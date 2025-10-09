@@ -367,14 +367,14 @@ function GetOptions_AudioMultiChannelDevices()
 
     // Get output from aplay -L which lists all ALSA PCM devices
     exec($SUDO . " aplay -L 2>/dev/null", $output, $return_val);
-    
+
     if ($return_val == 0 && !empty($output)) {
         $currentDevice = '';
         $currentDescription = '';
-        
+
         foreach ($output as $line) {
             $line = trim($line);
-            
+
             // Device names don't start with spaces, descriptions do
             if (!empty($line) && $line[0] != ' ') {
                 // This is a device name
@@ -400,7 +400,7 @@ function GetOptions_AudioMultiChannelDevices()
                 }
             }
         }
-        
+
         // Process last device
         if (!empty($currentDevice) && preg_match('/surround(40|41|50|51|71)/', $currentDevice)) {
             $label = $currentDescription;
@@ -411,14 +411,14 @@ function GetOptions_AudioMultiChannelDevices()
             $devices[$label] = $currentDevice;
         }
     }
-    
+
     unset($output);
-    
+
     // If no multi-channel devices found, add a helpful message
     if (count($devices) == 1) {
         $devices['-- No Multi-Channel Devices Found --'] = '';
     }
-    
+
     return json($devices);
 }
 
