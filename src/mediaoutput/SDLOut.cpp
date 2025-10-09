@@ -815,12 +815,36 @@ bool SDL::openAudio() {
         _wanted_spec.callback = nullptr;
         _wanted_spec.userdata = nullptr;
 
+        // Check if user specified a custom ALSA PCM device for multi-channel audio
+        std::string alsaPcmDevice = getSetting("AlsaAudioDevice", "");
+        if (!alsaPcmDevice.empty() && forceAudioId.empty()) {
+            // User has specified a custom ALSA PCM device (e.g., surround51:CARD=Ultra)
+            audioDeviceName = alsaPcmDevice;
+            LogDebug(VB_MEDIAOUT, "Using custom ALSA PCM device: %s\n", audioDeviceName.c_str());
+        }
+
+        // For multi-channel audio (>2 channels), don't allow SDL to change the channel count
+        // This prevents SDL from downmixing to stereo when the device supports multi-channel
+        int flags = SDL_AUDIO_ALLOW_FREQUENCY_CHANGE | SDL_AUDIO_ALLOW_FORMAT_CHANGE;
+        if (_wanted_spec.channels == 2) {
+            // Only allow channel changes for stereo - SDL can handle this better
+            flags |= SDL_AUDIO_ALLOW_CHANNELS_CHANGE;
+        }
+
         SDL_AudioSpec have;
-        audioDev = SDL_OpenAudioDevice(audioDeviceName == "" ? nullptr : audioDeviceName.c_str(), 0, &_wanted_spec, &have, SDL_AUDIO_ALLOW_FREQUENCY_CHANGE | SDL_AUDIO_ALLOW_FORMAT_CHANGE | SDL_AUDIO_ALLOW_CHANNELS_CHANGE);
+        audioDev = SDL_OpenAudioDevice(audioDeviceName == "" ? nullptr : audioDeviceName.c_str(), 0, &_wanted_spec, &have, flags);
         if (audioDev == 0 && !noDeviceWarning) {
             noDeviceError = "Could not open audio device - ";
             noDeviceError += SDL_GetError();
             LogErr(VB_MEDIAOUT, "%s\n", noDeviceError.c_str());
+            
+            // Provide helpful error message for multi-channel audio
+            if (_wanted_spec.channels > 2) {
+                LogErr(VB_MEDIAOUT, "Multi-channel audio (%d channels) failed. Possible solutions:\n", _wanted_spec.channels);
+                LogErr(VB_MEDIAOUT, "  1. Select a multi-channel ALSA device in Audio Output Settings\n");
+                LogErr(VB_MEDIAOUT, "  2. Run 'aplay -L' to list available surround devices\n");
+                LogErr(VB_MEDIAOUT, "  3. Verify your sound card supports %d channels\n", _wanted_spec.channels);
+            }
             noDeviceWarning = true;
         } else {
             LogDebug(VB_MEDIAOUT, "Opened Audio Device -  Rates:  %d -> %d     AudioFormat:  %X -> %X    Channels: %d -> %d\n",
@@ -829,7 +853,12 @@ bool SDL::openAudio() {
                 // we'll only support these
                 LogDebug(VB_MEDIAOUT, "    Format not supported, will reopen\n");
                 SDL_CloseAudioDevice(audioDev);
-                audioDev = SDL_OpenAudioDevice(NULL, 0, &_wanted_spec, &have, SDL_AUDIO_ALLOW_FREQUENCY_CHANGE);
+                // Use same flags logic for reopening
+                int reopenFlags = SDL_AUDIO_ALLOW_FREQUENCY_CHANGE;
+                if (_wanted_spec.channels == 2) {
+                    reopenFlags |= SDL_AUDIO_ALLOW_CHANNELS_CHANGE;
+                }
+                audioDev = SDL_OpenAudioDevice(NULL, 0, &_wanted_spec, &have, reopenFlags);
                 if (audioDev == 0 && !noDeviceWarning) {
                     noDeviceError = "Could not open audio device - ";
                     noDeviceError += SDL_GetError();

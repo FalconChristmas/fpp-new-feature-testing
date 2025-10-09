@@ -127,6 +127,7 @@
 				"AudioMixerDevice",
 				"AudioFormat",
 				"AudioLayout",
+				"AlsaAudioDevice",
 				"AudioBufferSize",
 				"AudioPeriodSize",
 				"ForceAudioId",
@@ -667,6 +668,18 @@
 				"Left/Right/Front Center/Side Left/Side Right/Back Left/Back Right (7.0)": 14,
 				"Left/Right/Front Center/Side Left/Side Right/Back Left/Back Right/LFE (7.1)": 15
 			}
+		},
+		"AlsaAudioDevice": {
+			"name": "AlsaAudioDevice",
+			"description": "Multi-Channel ALSA Device",
+			"tip": "For multi-channel audio (4.0, 5.1, 7.1, etc.), select the appropriate ALSA surround device. This is automatically populated from devices that support multi-channel output. Use 'Auto' to let the system choose based on your audio card selection.",
+			"gatherStats": false,
+			"level": 1,
+			"restart": 1,
+			"reboot": 0,
+			"default": "",
+			"type": "select",
+			"optionsURL": "api/options/AudioMultiChannelDevices"
 		},
 		"AudioBufferSize": {
 			"name": "AudioBufferSize",

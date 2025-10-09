@@ -355,6 +355,73 @@ function GetOptions_GPIOS($list)
     return json($ret);
 }
 
+/////////////////////////////////////////////////////////////////////////////
+// Get multi-channel capable ALSA devices for surround sound
+function GetOptions_AudioMultiChannelDevices()
+{
+    global $SUDO;
+
+    $devices = array();
+    // Add default option
+    $devices['-- Auto (Use Card Default) --'] = '';
+
+    // Get output from aplay -L which lists all ALSA PCM devices
+    exec($SUDO . " aplay -L 2>/dev/null", $output, $return_val);
+    
+    if ($return_val == 0 && !empty($output)) {
+        $currentDevice = '';
+        $currentDescription = '';
+        
+        foreach ($output as $line) {
+            $line = trim($line);
+            
+            // Device names don't start with spaces, descriptions do
+            if (!empty($line) && $line[0] != ' ') {
+                // This is a device name
+                if (!empty($currentDevice)) {
+                    // Process previous device
+                    if (preg_match('/surround(40|41|50|51|71)/', $currentDevice)) {
+                        // This is a multi-channel device
+                        $label = $currentDescription;
+                        if (empty($label)) {
+                            $label = $currentDevice;
+                        }
+                        // Clean up the label
+                        $label = preg_replace('/\s+/', ' ', $label);
+                        $devices[$label] = $currentDevice;
+                    }
+                }
+                $currentDevice = $line;
+                $currentDescription = '';
+            } else if (!empty($line)) {
+                // This is a description line
+                if (empty($currentDescription)) {
+                    $currentDescription = trim($line);
+                }
+            }
+        }
+        
+        // Process last device
+        if (!empty($currentDevice) && preg_match('/surround(40|41|50|51|71)/', $currentDevice)) {
+            $label = $currentDescription;
+            if (empty($label)) {
+                $label = $currentDevice;
+            }
+            $label = preg_replace('/\s+/', ' ', $label);
+            $devices[$label] = $currentDevice;
+        }
+    }
+    
+    unset($output);
+    
+    // If no multi-channel devices found, add a helpful message
+    if (count($devices) == 1) {
+        $devices['-- No Multi-Channel Devices Found --'] = '';
+    }
+    
+    return json($devices);
+}
+
 
 /////////////////////////////////////////////////////////////////////////////
 // GET /api/options/:SettingName
@@ -375,6 +442,8 @@ function GetOptions()
             return GetOptions_AudioInputDevice(true);
         case 'AudioInputListAllowMedia':
             return GetOptions_AudioInputDevice(true, true);
+        case 'AudioMultiChannelDevices':
+            return GetOptions_AudioMultiChannelDevices();
         case 'FrameBuffer':
             return GetOptions_FrameBuffer();
         case 'BBBLeds':
