@@ -52,6 +52,7 @@ HTTPVirtualDisplayOutput::HTTPVirtualDisplayOutput(unsigned int startChannel,
     VirtualDisplayBaseOutput(startChannel, channelCount),
     m_port(HTTPVIRTUALDISPLAYPORT),
     m_screenSize(0),
+    m_updateInterval(1),  // Default: send every frame for smooth playback
     m_socket(-1),
     m_running(true),
     m_connListChanged(true),
@@ -119,6 +120,13 @@ int HTTPVirtualDisplayOutput::Init(Json::Value config) {
 
     if (config.isMember("port"))
         m_port = config["port"].asInt();
+
+    if (config.isMember("updateInterval"))
+        m_updateInterval = config["updateInterval"].asInt();
+    
+    // Clamp to reasonable values (1-10 frames)
+    if (m_updateInterval < 1) m_updateInterval = 1;
+    if (m_updateInterval > 10) m_updateInterval = 10;
 
     // Signal base class to allocate m_virtualDisplay buffer
     m_width = -1;
@@ -302,13 +310,19 @@ void HTTPVirtualDisplayOutput::SelectThread(void) {
  */
 int HTTPVirtualDisplayOutput::WriteSSEPacket(int fd, std::string data) {
     int len = data.size();
-    std::stringstream stream;
     std::string sendData;
-
-    stream << std::hex << len;
-    sendData = stream.str();
+    
+    // Pre-allocate to avoid reallocations
+    sendData.reserve(20 + len); // hex length + delimiters + data
+    
+    // Convert length to hex directly into string
+    char hexBuf[16];
+    snprintf(hexBuf, sizeof(hexBuf), "%x", len);
+    
+    sendData = hexBuf;
     sendData += "\r\n";
-    sendData += data + "\r\n";
+    sendData += data;
+    sendData += "\r\n";
 
     write(fd, sendData.c_str(), sendData.size());
 
@@ -320,6 +334,7 @@ int HTTPVirtualDisplayOutput::WriteSSEPacket(int fd, std::string data) {
  */
 void HTTPVirtualDisplayOutput::PrepData(unsigned char* channelData) {
     static int id = 0;
+    static bool lastFrameWasBlack = false;
 
     LogExcess(VB_CHANNELOUT, "HTTPVirtualDisplayOutput::PrepData(%p)\n",
               channelData);
@@ -329,6 +344,30 @@ void HTTPVirtualDisplayOutput::PrepData(unsigned char* channelData) {
         std::unique_lock<std::mutex> lock(m_connListLock);
         if (!m_connList.size())
             return;
+    }
+
+    // Fast black detection - check if all channel data is zero (sequence ended/stopped)
+    // Only do this check occasionally to reduce CPU overhead
+    static int blackCheckCounter = 0;
+    bool allBlack = false;
+    bool forceBlackUpdate = false;
+    
+    // Check for black every 10th frame to reduce CPU, but always check if last frame was black
+    // to catch the transition back to color quickly
+    if (lastFrameWasBlack || (++blackCheckCounter >= 10)) {
+        blackCheckCounter = 0;
+        allBlack = true;
+        for (int i = 0; i < m_pixels.size() && allBlack; i++) {
+            unsigned char r, g, b;
+            GetPixelRGB(m_pixels[i], channelData, r, g, b);
+            if (r != 0 || g != 0 || b != 0) {
+                allBlack = false;
+            }
+        }
+        
+        // If transitioning to black, force update of all pixels
+        forceBlackUpdate = (allBlack && !lastFrameWasBlack);
+        lastFrameWasBlack = allBlack;
     }
 
     std::string data;
@@ -341,14 +380,7 @@ void HTTPVirtualDisplayOutput::PrepData(unsigned char* channelData) {
     char loc[7];
     int y;
     VirtualDisplayPixel pixel;
-    char base64[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz+/";
-
-    //	if ((id % 2) == 0)
-    //	{
-    //		id++;
-    //
-    //		return m_channelCount;
-    //	}
+    static const char* const base64 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz+/";
 
     for (int i = 0; i < m_pixels.size(); i++) {
         GetPixelRGB(m_pixels[i], channelData, r, g, b);
@@ -359,7 +391,9 @@ void HTTPVirtualDisplayOutput::PrepData(unsigned char* channelData) {
         g = g >> 2;
         b = b >> 2;
 
-        if ((m_virtualDisplay[m_pixels[i].r] != r) ||
+        // Send pixels that changed OR when forcing black update (sequence ended)
+        if (forceBlackUpdate ||
+            (m_virtualDisplay[m_pixels[i].r] != r) ||
             (m_virtualDisplay[m_pixels[i].g] != g) ||
             (m_virtualDisplay[m_pixels[i].b] != b)) {
             m_virtualDisplay[m_pixels[i].r] = r;
@@ -396,15 +430,24 @@ void HTTPVirtualDisplayOutput::PrepData(unsigned char* channelData) {
     }
 
     if (colors.size()) {
+        // Pre-allocate to avoid reallocations during string building
+        m_sseData.clear();
+        m_sseData.reserve(128 + colors.size() * 16); // Estimate: header + avg color data
+        
         m_sseData = "id: ";
         m_sseData += std::to_string(id) + "\r\n";
         m_sseData += "event: message\r\n";
         m_sseData += "data: ";
 
         std::string data2;
+        data2.reserve(colors.size() * 16); // Pre-allocate for color data
+        
+        bool first = true;
         for (const auto& pair : colors) {
-            if (data2 != "")
+            if (!first)
                 data2 += "|";
+            else
+                first = false;
 
             data2 += pair.second;
         }
@@ -412,8 +455,13 @@ void HTTPVirtualDisplayOutput::PrepData(unsigned char* channelData) {
 
         LogExcess(VB_CHANNELOUT, "PixelsChanged: %d, Colors: %d, Data Size: %d\n",
                   pixelsChanged, colors.size(), m_sseData.size());
-    } else
-        m_sseData = "";
+    } else {
+        // Send empty update to keep connection alive and maintain frame timing
+        m_sseData = "id: ";
+        m_sseData += std::to_string(id) + "\r\n";
+        m_sseData += "event: ping\r\n";
+        m_sseData += "data: \r\n\r\n";
+    }
 
     id++;
 }

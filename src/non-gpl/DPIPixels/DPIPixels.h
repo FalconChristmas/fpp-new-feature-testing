@@ -62,9 +62,13 @@ private:
 
     std::vector<PixelString*> pixelStrings;
     int bitPos[24];
+    uint32_t bitMask[24];  // Pre-calculated bitmasks for performance
 
     FrameBuffer* fb = nullptr;
     int fbPage = -1;
+    bool displayEnabled = false;  // Track if CRTC/plane is enabled
+    bool initComplete = false;    // Track if initialization is complete
+    int nonZeroFrameCount = 0;    // Track consecutive frames with significant data
 
     int stringCount = 0;
     int longestString = 0;
@@ -72,6 +76,7 @@ private:
     int firstStringInBank[MAX_DPI_PIXEL_BANKS];
     uint32_t latchPinMask = 0x000000;
     uint32_t latchPinMasks[MAX_DPI_PIXEL_BANKS];
+    uint32_t nonLatchPins = 0xFFFFFF;  // All pins except latches
 
     int protoBitsPerLine = 0;
     int protoBitOnLine = 0;
@@ -81,6 +86,10 @@ private:
     // WS281x vars
     int fbPixelMult = 1;
     int fbEndBufferSize = 1;
+    int ws281xResetLines = 10;  // Number of blank lines at top of FB for WS281x RESET
+    
+    // Track which pins we configured as DPI so we can reset them on close
+    std::vector<std::string> m_configuredDpiPins;
 
     // output testing data
     int m_testCycle = -1;
