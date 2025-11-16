@@ -503,7 +503,9 @@ case "${OSVER}" in
                       gettext apt-utils x265 libtheora-dev libvorbis-dev libx265-dev iputils-ping mp3gain \
                       libmosquitto-dev mosquitto-clients mosquitto libzstd-dev lzma zstd gpiod libgpiod-dev libjsoncpp-dev libcurl4-openssl-dev \
                       fonts-freefont-ttf flex bison pkg-config libasound2-dev mesa-common-dev qrencode libusb-1.0-0-dev \
-                      flex bison pkg-config libasound2-dev python3-setuptools libssl-dev libtool bsdextrautils iw rsyslog tzdata"
+                  flex bison pkg-config libasound2-dev python3-setuptools libssl-dev libtool bsdextrautils iw rsyslog tzdata \
+                  pipewire pipewire-bin pipewire-alsa pipewire-pulse pipewire-jack pipewire-audio-client-libraries wireplumber \
+                  libspa-0.2-bluetooth pulseaudio-utils"
 
         if [ "$FPPPLATFORM" == "Raspberry Pi" -o "$FPPPLATFORM" == "BeagleBone Black"  -o "$FPPPLATFORM" == "BeagleBone 64" ]; then
             PACKAGE_LIST="$PACKAGE_LIST firmware-realtek firmware-atheros firmware-ralink firmware-brcm80211 firmware-iwlwifi firmware-libertas firmware-zd1211 firmware-ti-connectivity zram-tools"
@@ -1498,6 +1500,16 @@ fi
 echo "FPP - Configuring FPP startup"
 cp /opt/fpp/etc/systemd/*.service /lib/systemd/system/
 cp /opt/fpp/etc/avahi/* /etc/avahi/services
+mkdir -p /etc/pipewire /etc/pipewire/pipewire.conf.d
+cp -a /opt/fpp/etc/pipewire/pipewire.conf.d/. /etc/pipewire/pipewire.conf.d/
+mkdir -p /etc/wireplumber/main.lua.d
+cp -a /opt/fpp/etc/wireplumber/main.lua.d/. /etc/wireplumber/main.lua.d/
+if [ ! -f /etc/pipewire/pipewire.conf ] && [ -f /usr/share/pipewire/pipewire.conf ]; then
+    cp /usr/share/pipewire/pipewire.conf /etc/pipewire/pipewire.conf
+fi
+if [ ! -f /etc/pipewire/pipewire-pulse.conf ] && [ -f /usr/share/pipewire/pipewire-pulse.conf ]; then
+    cp /usr/share/pipewire/pipewire-pulse.conf /etc/pipewire/pipewire-pulse.conf
+fi
 if $isimage; then
     mkdir -p /etc/networkd-dispatcher/initialized.d
     cp -a /opt/fpp/etc/networkd-dispatcher/* /etc/networkd-dispatcher
@@ -1512,6 +1524,9 @@ systemctl enable fppd.service
 systemctl enable fpp_postnetwork.service
 systemctl enable fpp-install-kiosk.service
 systemctl enable fpp-reboot.service
+systemctl enable fpp-pipewire.service
+systemctl enable fpp-wireplumber.service
+systemctl enable fpp-pipewire-pulse.service
 
 if $isimage; then
     cp /opt/fpp/etc/update-RTC /etc/cron.daily
