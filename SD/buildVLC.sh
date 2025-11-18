@@ -10,6 +10,7 @@ case "${ARMV}" in
     ;;
     * )
         cd /opt
+        apt-get install -y libpipewire-0.3-dev
         git clone https://code.videolan.org/videolan/vlc.git
         cd vlc
         # this is latest master as of 01/28/2025
@@ -41,7 +42,7 @@ case "${ARMV}" in
         export LDFLAGS="-latomic"
         ./bootstrap
         export LDFLAGS="-latomic"
-        ./configure --disable-gles2 --disable-lua --disable-a52 --disable-chromecast --disable-chromaprint  --disable-pulse --disable-jack --disable-dbus --disable-avahi --disable-qt $DISABLES --enable-run-as-root --enable-libdrm
+        ./configure --disable-gles2 --disable-lua --disable-a52 --disable-chromecast --disable-chromaprint  --disable-pulse --disable-jack --disable-dbus --disable-avahi --disable-qt --enable-pipewire $DISABLES --enable-run-as-root --enable-libdrm
         make -j ${CPUS}
         make install
         ldconfig
