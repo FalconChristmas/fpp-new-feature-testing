@@ -627,6 +627,7 @@ static void setupNetwork(bool fullReload = false) {
             if (startsWith(interface, "wl")) {
                 // wifi settings
                 if (tetherEnabled == 1 && interface == tetherInterface) {
+                    // Mode 1: Always enabled (backward compatible with old "Enabled")
                     filesNeeded["/etc/hostapd/hostapd.conf"] = CreateHostAPDConfig(interface);
                     DHCPSERVER = 1;
                     hostapd = true;
@@ -1267,6 +1268,7 @@ static void disableWLANPowerManagement() {
 static void maybeEnableTethering() {
     int te = getRawSettingInt("EnableTethering", 0);
     if (te == 0) {
+        // Mode 0: If no network connection at all
         bool found = false;
         struct ifaddrs* ifAddrStruct = NULL;
         struct ifaddrs* ifa = NULL;
@@ -1296,9 +1298,60 @@ static void maybeEnableTethering() {
         }
         if (!found) {
             // did not find an ip address
-            te = 1;
+            te = 1; // Enable tethering
+        }
+    } else if (te == 3) {
+        // Mode 3: If no WiFi client connection on tether interface
+        // Check if the interface has an SSID configured (should try to connect as client first)
+        std::string tetherInterface = FindTetherWIFIAdapater();
+        if (!FileExists(FPP_MEDIA_DIR + "/config/interface." + tetherInterface)) {
+            // No interface config, can't be in client mode anyway
+            te = 0;
+        } else {
+            auto interfaceSettings = loadSettingsFile(FPP_MEDIA_DIR + "/config/interface." + tetherInterface);
+            if (interfaceSettings["SSID"].empty()) {
+                // No SSID configured, enable tether immediately
+                te = 1;
+            } else if (FileExists("/sys/class/net/" + tetherInterface)) {
+                // SSID is configured, check if WiFi has successfully connected and has an IP
+                bool hasIP = false;
+                struct ifaddrs* ifAddrStruct = NULL;
+                struct ifaddrs* ifa = NULL;
+                void* tmpAddrPtr = NULL;
+                getifaddrs(&ifAddrStruct);
+                for (ifa = ifAddrStruct; ifa != NULL; ifa = ifa->ifa_next) {
+                    if (!ifa->ifa_addr) {
+                        continue;
+                    }
+                    std::string nm = ifa->ifa_name;
+                    if (nm == tetherInterface && ifa->ifa_addr->sa_family == AF_INET) {
+                        tmpAddrPtr = &((struct sockaddr_in*)ifa->ifa_addr)->sin_addr;
+                        char addressBuffer[INET_ADDRSTRLEN];
+                        inet_ntop(AF_INET, tmpAddrPtr, addressBuffer, INET_ADDRSTRLEN);
+                        std::string addr = addressBuffer;
+                        // Check it's not the tether IP
+                        if (!contains(addr, "192.168.8.1")) {
+                            hasIP = true;
+                        }
+                    }
+                }
+                if (ifAddrStruct != NULL) {
+                    freeifaddrs(ifAddrStruct);
+                }
+
+                if (hasIP) {
+                    te = 0; // WiFi has an IP, is connected as client, don't enable tether
+                } else {
+                    te = 1; // No IP on WiFi, enable tethering
+                }
+            } else {
+                te = 0; // No tether interface available
+            }
         }
     }
+    // Mode 1: Always enabled (backward compatible with old "Enabled")
+    // Mode 2: Disabled
+
     std::string tetherInterface = FindTetherWIFIAdapater();
     if (te == 1) {
         if (!FileExists("/sys/class/net/" + tetherInterface)) {
@@ -1881,7 +1934,12 @@ int main(int argc, char* argv[]) {
         // Time sync wait happens AFTER interfaces are up so NTP has a chance to sync
         handleTimeSyncWait();
         if (!FileExists("/etc/fpp/desktop")) {
-            maybeEnableTethering();
+            int te = getRawSettingInt("EnableTethering", 0);
+            if (te != 3) {
+                // For mode 3, don't call maybeEnableTethering here - let checkForTether handle it
+                // after waiting for WiFi to attempt connection
+                maybeEnableTethering();
+            }
             detectNetworkModules();
         }
         setupTimezone(); // this may not have worked in the init phase, try again
@@ -1930,7 +1988,13 @@ int main(int argc, char* argv[]) {
             if (a.starts_with("active") && argc >= 3) {
                 std::string iface = argv[2];
                 if (iface.starts_with("wlan")) {
-                    waitForInterfacesUp(false, 20);
+                    int te = getRawSettingInt("EnableTethering", 0);
+                    if (te == 3) {
+                        // Mode 3: If no WiFi client - give WiFi more time to connect before enabling tether
+                        waitForInterfacesUp(false, 30); // Wait up to 30 seconds for WiFi client to connect
+                    } else {
+                        waitForInterfacesUp(false, 20);
+                    }
                     maybeEnableTethering();
                     detectNetworkModules();
                 }
@@ -1938,15 +2002,38 @@ int main(int argc, char* argv[]) {
         }
     } else if (action == "maybeRemoveTether") {
         int te = getRawSettingInt("EnableTethering", 0);
-        if (!FileExists(networkSetupMut) && (te != 1)) {
+        if (!FileExists(networkSetupMut)) {
             std::string e = execAndReturn("systemctl is-enabled hostapd");
             std::string a = execAndReturn("systemctl is-active hostapd");
             TrimWhiteSpace(e);
             TrimWhiteSpace(a);
             if (a.starts_with("active") || e.starts_with("enabled")) {
                 std::string iface = argv[2];
-                if (FindTetherWIFIAdapater() != iface && !iface.starts_with("usb") && !iface.starts_with("lo") && waitForInterfacesUp(false, 10)) {
-                    exec("rm -f /etc/systemd/network/10-" + FindTetherWIFIAdapater() + ".network");
+                std::string tetherIface = FindTetherWIFIAdapater();
+
+                bool shouldRemove = false;
+
+                if (te == 2) {
+                    // Mode 2: Disabled - always remove if running
+                    shouldRemove = true;
+                } else if (te == 1) {
+                    // Mode 1: Always enabled - never remove due to interface state (backward compatible)
+                    shouldRemove = false;
+                } else if (te == 0 && tetherIface != iface && !iface.starts_with("usb") && !iface.starts_with("lo")) {
+                    // Mode 0: If no network - remove only if a non-tether, non-USB interface came up
+                    if (waitForInterfacesUp(false, 10)) {
+                        shouldRemove = true;
+                    }
+                } else if (te == 3 && iface == tetherIface) {
+                    // Mode 3: If no WiFi client - check if WiFi connected as client now
+                    std::string output = execAndReturn("/usr/sbin/iw " + tetherIface + " link");
+                    if (!contains(output, "Not connected")) {
+                        shouldRemove = true;
+                    }
+                }
+
+                if (shouldRemove) {
+                    exec("rm -f /etc/systemd/network/10-" + tetherIface + ".network");
                     exec("rm -f /home/fpp/media/tmp/wifi-*.ascii");
                     exec("systemctl stop hostapd.service");
                     exec("systemctl disable hostapd.service");

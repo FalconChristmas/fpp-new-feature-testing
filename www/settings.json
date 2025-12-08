@@ -1149,15 +1149,16 @@
 		"EnableTethering": {
 			"name": "EnableTethering",
 			"description": "Tethering Mode",
-			"tip": "Enable or disable FPP WiFi tethering mode",
+			"tip": "Control when FPP WiFi tethering mode is enabled. 'If no network' enables tether only when no IP addresses exist. 'Always' keeps tether permanently on. 'Disabled' never enables tether. 'If no WiFi client' enables tether when WiFi is not connected as a client.",
 			"gatherStats": true,
 			"reboot": 1,
 			"default": 0,
 			"type": "select",
 			"options": {
-				"If no connection": 0,
-				"Enabled": 1,
-				"Disabled": 2
+				"If no network connection at all": 0,
+				"Always (ignore wired interface state)": 1,
+				"Disabled": 2,
+				"If no WiFi client connection on tether interface": 3
 			}
 		},
 		"fileManagerThumbnailSize": {
