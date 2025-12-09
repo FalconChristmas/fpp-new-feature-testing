@@ -15,6 +15,8 @@
 #include <mutex>
 #include <thread>
 
+#include "../channeloutput/ColorOrder.h"
+
 class RunningEffect;
 
 class PixelOverlayState {
@@ -134,6 +136,7 @@ protected:
     int startChannel;
     int channelCount;
     int channelsPerNode;
+    FPPColorOrder colorOrder;
 
     std::vector<uint32_t> channelMap;
     uint8_t* channelData;
