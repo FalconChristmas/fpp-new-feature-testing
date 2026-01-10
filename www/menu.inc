@@ -258,7 +258,7 @@ function list_plugin_entries($menu)
             <? if (!file_exists(__DIR__ . "/../src/fppd")) { ?>
                 <div id='rebuildPopup' title='FPP Upgrade' style="display: none">
                     <textarea style='width: 99%; height: 97%;' disabled id='rebuildText'>
-                                                                                                                                                                                            </textarea>
+                                                                                                                                                                                                </textarea>
                 </div>
                 <script>
                     function RebuildFPPDDone() {
@@ -432,7 +432,7 @@ function list_plugin_entries($menu)
                                     rel="noopener noreferrer"><i class="fas fa-solid fa-gift"></i> Donate to FPP <i
                                         class="fas fa-external-link-alt external-link"></i></a>
                                 <hr class="dropdown-divider">
-                                <a class="dropdown-item" href="healthCheck.php"><i class="fas fa-thermometer-half"></i>
+                                <a class="dropdown-item" href="system-stats.php"><i class="fas fa-thermometer-half"></i>
                                     System Health
                                     Check</a>
                                 <a class="dropdown-item" href="troubleshooting.php"><i class="fas fa-code"></i>

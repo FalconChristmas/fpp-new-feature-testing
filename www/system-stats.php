@@ -158,6 +158,27 @@
         var uptimeInterval;
         var uptimeSeconds = 0;
 
+        function HealthCheckDone() {
+            SetButtonState('#btnStartHealthCheck', 'enable');
+        }
+
+        function StartHealthCheck() {
+            SetButtonState('#btnStartHealthCheck', 'disable');
+            $('#healthCheckOutput').html('<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Running health checks...</div>');
+
+            $.ajax({
+                url: "healthCheckHelper.php?output=php&timestamp=" + (Date.parse(Date()) / 1000),
+                method: "GET",
+                dataType: "HTML"
+            }).done(function (html) {
+                $("#healthCheckOutput").html(html);
+                HealthCheckDone();
+            }).fail(function () {
+                $("#healthCheckOutput").html('<div class="alert alert-danger">Failed to run health check</div>');
+                HealthCheckDone();
+            });
+        }
+
         function drawGauge(elementId, value, label, unit, thresholds) {
             var svg = document.getElementById(elementId);
             if (!svg) return;
@@ -478,7 +499,7 @@
         }
 
         $(document).ready(function () {
-            updateStats();
+            StartHealthCheck(); updateStats();
             setInterval(function () {
                 updateStats();
             }, 5000);
@@ -493,8 +514,32 @@
         include 'menu.inc';
         ?>
         <div class="mainContainer">
-            <h1 class="title">System Stats</h1>
+            <h1 class="title">Health and Status</h1>
             <div class="pageContent">
+
+                <?php
+                if (isset($settings["UnpartitionedSpace"]) && $settings["UnpartitionedSpace"] > 0) {
+                    ?>
+                    <div id='upgradeFlag' class="alert alert-danger" role="alert">
+                        SD card has unused space. Go to
+                        <a href="settings.php#settings-storage">Storage Settings</a> to expand the
+                        file system or create a new storage partition.
+                    </div>
+                    <?php
+                }
+                ?>
+
+                <!-- Health Check Section -->
+                <div class="card compact-card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h3><i class="fas fa-heartbeat"></i> Health Check</h3>
+                        <button id='btnStartHealthCheck' class='btn btn-sm btn-primary'
+                            onClick='StartHealthCheck();'>Run Health Check</button>
+                    </div>
+                    <div class="card-body">
+                        <div id='healthCheckOutput'></div>
+                    </div>
+                </div>
 
                 <!-- Disk Space Warning Banner -->
                 <div id="disk-warning" class="alert alert-warning alert-dismissible fade show warning-banner"
