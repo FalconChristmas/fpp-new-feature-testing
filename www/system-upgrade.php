@@ -1344,6 +1344,8 @@
                                         target="_blank">Forums</a></li>
                                 <li><i class="fas fa-bug"></i> <a href="https://github.com/FalconChristmas/fpp/issues"
                                         target="_blank">Report Issues</a></li>
+                                <li><i class="fas fa-heart"></i> <a href="system-stats.php" target="_blank">System
+                                        Health</a></li>
                             </ul>
                         </div>
                     </div>
@@ -1409,6 +1411,7 @@
                                     <td style="text-align: center;"><i class="fas fa-times text-danger"></i> No</td>
                                     <td style="text-align: center;"><i class="fas fa-check text-success"></i> Yes</td>
                                 </tr>
+
                             </tbody>
                         </table>
                         <p class="text-muted" style="font-size: 0.85em; margin-top: 10px;">
