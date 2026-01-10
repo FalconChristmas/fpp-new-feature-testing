@@ -82,9 +82,9 @@ function list_plugin_entries($menu)
                 }
                 ?>
             </a>
-            <a href='about.php' class='nonULLink headerLink versionHead'><?php echo $fpp_head_version; ?></a>
+            <a href='system-upgrade.php' class='nonULLink headerLink versionHead'><?php echo $fpp_head_version; ?></a>
             <div id="navbarUpdateAvail">
-                &nbsp;<a href="about.php" role="button">
+                &nbsp;<a href="system-upgrade.php" role="button">
                     <i class="fa-solid fa-download" id="navbarUpdateAvailIcon"></i>
                 </a>
             </div>
@@ -258,7 +258,7 @@ function list_plugin_entries($menu)
             <? if (!file_exists(__DIR__ . "/../src/fppd")) { ?>
                 <div id='rebuildPopup' title='FPP Upgrade' style="display: none">
                     <textarea style='width: 99%; height: 97%;' disabled id='rebuildText'>
-                                                                                                                                                                                        </textarea>
+                                                                                                                                                                                            </textarea>
                 </div>
                 <script>
                     function RebuildFPPDDone() {
