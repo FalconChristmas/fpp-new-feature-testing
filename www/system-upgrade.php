@@ -468,10 +468,17 @@
                         html += '<td>' + row.msg + '</td>';
                         html += '</tr>';
                     });
+                    html += '</tbody></table>';
                 } else {
-                    html += '<tr><td colspan="3" class="text-center">No pending changes found</td></tr>';
+                    html += '<tr><td colspan="3" class="text-center">';
+                    html += '<div class="alert alert-info mb-0">';
+                    html += '<i class="fas fa-info-circle"></i> ';
+                    html += 'Unable to determine pending changes. This may occur when working with feature branches or forks. ';
+                    html += 'You can still update to get the latest changes using the "Update FPP Now" button.';
+                    html += '</div>';
+                    html += '</td></tr>';
+                    html += '</tbody></table>';
                 }
-                html += '</tbody></table>';
                 $('#gitOriginLogModal .modal-body').html(html);
             }).fail(function () {
                 $('#gitOriginLogModal .modal-body').html('<div class="alert alert-danger">Failed to load git changes</div>');
