@@ -8,230 +8,220 @@
 
     include 'common/menuHead.inc';
     ?>
-    <style>
-        .gauge-container {
-            text-align: center;
-            padding: 15px;
-        }
-
-        .gauge-svg {
-            max-width: 150px;
-            height: 150px;
-            margin: 0 auto;
-        }
-
-        .gauge-label {
-            font-size: 0.9em;
-            color: #666;
-            margin-top: 8px;
-        }
-
-        .gauge-value {
-            font-size: 1.5em;
-            font-weight: bold;
-            margin-top: 5px;
-        }
-
-        .disk-row {
-            margin-bottom: 15px;
-        }
-
-        .disk-label {
-            font-size: 0.9em;
-            margin-bottom: 5px;
-            display: flex;
-            justify-content: space-between;
-        }
-
-        .disk-device {
-            color: #666;
-            font-weight: 600;
-        }
-
-        .disk-info {
-            color: #999;
-            font-size: 0.85em;
-        }
-
-        .uptime-display {
-            text-align: center;
-            padding: 20px;
-        }
-
-        .uptime-counters {
-            display: flex;
-            justify-content: center;
-            gap: 15px;
-            margin-bottom: 10px;
-        }
-
-        .uptime-segment {
-            text-align: center;
-        }
-
-        .uptime-number {
-            font-size: 2em;
-            font-weight: bold;
-            color: #007bff;
-        }
-
-        .uptime-label {
-            font-size: 0.75em;
-            color: #666;
-            text-transform: uppercase;
-        }
-
-        .uptime-started {
-            color: #999;
-            font-size: 0.85em;
-        }
-
-        .load-bar-container {
-            margin-bottom: 12px;
-        }
-
-        .load-label {
-            font-size: 0.9em;
-            margin-bottom: 3px;
-            display: flex;
-            justify-content: space-between;
-        }
-
-        .stat-link {
-            display: flex;
-            justify-content: space-between;
-            padding: 8px 12px;
-            margin-bottom: 5px;
-            border-radius: 4px;
-            text-decoration: none;
-            color: inherit;
-            transition: background-color 0.2s;
-        }
-
-        .stat-link:hover {
-            background-color: #f8f9fa;
-            color: inherit;
-        }
-
-        .stat-name {
-            color: #666;
-        }
-
-        .stat-count {
-            font-weight: bold;
-            color: #007bff;
-        }
-
-        .warning-banner {
-            margin-bottom: 20px;
-        }
-
-        .file-breakdown {
-            margin-top: 15px;
-        }
-
-        .file-type-row {
-            margin-bottom: 10px;
-        }
-
-        .file-type-label {
-            font-size: 0.85em;
-            margin-bottom: 3px;
-            display: flex;
-            justify-content: space-between;
-        }
-
-        .compact-card {
-            margin-bottom: 15px;
-        }
-
-        .compact-card .card-body {
-            padding: 15px;
-        }
-
-        .compact-card .card-header h3 {
-            font-size: 1.1em;
-            margin: 0;
-        }
-    </style>
+    <link rel="stylesheet" href="css/fpp-system-design.css">
     <script>
         var uptimeInterval;
         var uptimeSeconds = 0;
 
+        var healthCheckSource = null;
+
+        // Track which checks have received results
+        var receivedChecks = {};
+
         function HealthCheckDone() {
-            SetButtonState('#btnStartHealthCheck', 'enable');
-        }
+            $('#btnStartHealthCheck').prop('disabled', false);
+            $('#btnStartHealthCheck i').removeClass('fa-spin');
+            if (healthCheckSource) {
+                healthCheckSource.close();
+                healthCheckSource = null;
+            }
 
-        function StartHealthCheck() {
-            SetButtonState('#btnStartHealthCheck', 'disable');
-            $('#healthCheckOutput').html('<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Running health checks...</div>');
-
-            $.ajax({
-                url: "healthCheckHelper.php?output=php&timestamp=" + (Date.parse(Date()) / 1000),
-                method: "GET",
-                dataType: "HTML"
-            }).done(function (html) {
-                $("#healthCheckOutput").html(html);
-                HealthCheckDone();
-            }).fail(function () {
-                $("#healthCheckOutput").html('<div class="alert alert-danger">Failed to run health check</div>');
-                HealthCheckDone();
+            // Mark any static checks that didn't receive results as "Skipped"
+            var allChecks = healthChecks.left.concat(healthChecks.right);
+            allChecks.forEach(function(check) {
+                if (check.static && !receivedChecks[check.id]) {
+                    var statusEl = $('#hc-' + check.id);
+                    if (statusEl.length) {
+                        statusEl.html(
+                            '<i class="fas fa-minus-circle fpp-health-check__status-icon fpp-status--loading"></i>' +
+                            '<span class="fpp-health-check__status-text" title="Skipped">Skipped</span>'
+                        );
+                    }
+                }
             });
         }
 
-        function drawGauge(elementId, value, label, unit, thresholds) {
-            var svg = document.getElementById(elementId);
-            if (!svg) return;
+        function getStatusIcon(status) {
+            switch (status) {
+                case 'pass': return 'fa-check-circle fpp-status--pass';
+                case 'warn': return 'fa-exclamation-circle fpp-status--warn';
+                case 'fail': return 'fa-times-circle fpp-status--fail';
+                default: return 'fa-spinner fa-spin fpp-status--loading';
+            }
+        }
 
-            var radius = 60;
-            var centerX = 75;
-            var centerY = 75;
-            var startAngle = -Math.PI * 0.75;
-            var endAngle = Math.PI * 0.75;
-            var totalAngle = endAngle - startAngle;
+        function updateHealthCheckItem(check) {
+            var itemEl = $('[data-check="' + check.id + '"]');
+            var statusEl = $('#hc-' + check.id);
 
-            // Use custom thresholds or defaults (for percentage-based gauges)
-            var yellowThreshold = thresholds ? thresholds.yellow : 60;
-            var redThreshold = thresholds ? thresholds.red : 80;
+            // Track that we received this check
+            receivedChecks[check.id] = true;
 
-            // Color based on value
-            var color = '#28a745'; // green
-            if (value > redThreshold) color = '#dc3545'; // red
-            else if (value > yellowThreshold) color = '#ffc107'; // yellow
+            if (statusEl.length) {
+                // Update the status content
+                statusEl.html(
+                    '<i class="fas ' + getStatusIcon(check.status) + ' fpp-health-check__status-icon"></i>' +
+                    '<span class="fpp-health-check__status-text" title="' + check.message + '">' + check.message + '</span>'
+                );
+                // Show the item if it was hidden (conditional check)
+                if (itemEl.length && conditionalChecks.includes(check.id)) {
+                    itemEl.show();
+                }
+            }
+        }
 
-            // Background arc
-            var bgPath = describeArc(centerX, centerY, radius, startAngle, endAngle);
-            svg.innerHTML = '<path d="' + bgPath + '" fill="none" stroke="#e9ecef" stroke-width="12"/>';
+        function updateHealthSummary(summary) {
+            $('#hcPassCount').text(summary.pass).removeClass().addClass('fpp-health-summary__count fpp-status--pass');
+            $('#hcWarnCount').text(summary.warn).removeClass().addClass('fpp-health-summary__count fpp-status--warn');
+            $('#hcFailCount').text(summary.fail).removeClass().addClass('fpp-health-summary__count fpp-status--fail');
+        }
 
-            // For temperature, normalize to 0-100 scale for display
-            var displayValue = value;
-            var normalizedValue = value;
-            if (thresholds && thresholds.max) {
-                normalizedValue = Math.min((value / thresholds.max) * 100, 100);
+        // All checks in display order - static ones are always shown, conditional ones start hidden
+        // Only scheduler and mediadisk are truly conditional (may not be emitted at all)
+        var healthChecks = {
+            left: [
+                { id: 'fppd', label: 'FPPD Daemon', icon: 'fa-play-circle', static: true },
+                { id: 'warnings', label: 'FPPD Warnings', icon: 'fa-exclamation-triangle', static: true },
+                { id: 'hostname', label: 'Hostname', icon: 'fa-server', static: true },
+                { id: 'rootdisk', label: 'Root Filesystem', icon: 'fa-hdd', static: true },
+                { id: 'ntp', label: 'Time Sync (NTP)', icon: 'fa-clock', static: true },
+                { id: 'scheduler', label: 'Scheduler', icon: 'fa-calendar-alt', static: false }
+            ],
+            right: [
+                { id: 'gateway', label: 'Default Gateway', icon: 'fa-network-wired', static: true },
+                { id: 'gateway_ping', label: 'Gateway Reachable', icon: 'fa-exchange-alt', static: true },
+                { id: 'internet', label: 'Internet Access', icon: 'fa-globe', static: true },
+                { id: 'dns', label: 'DNS Resolution', icon: 'fa-search', static: true },
+                { id: 'datetime', label: 'Browser Time Sync', icon: 'fa-clock', static: true },
+                { id: 'mediadisk', label: 'Media Partition', icon: 'fa-folder', static: false }
+            ]
+        };
+
+        // Only these two checks may not be emitted at all
+        var conditionalChecks = ['scheduler', 'mediadisk'];
+
+        function renderPlaceholder(check) {
+            var hiddenStyle = check.static ? '' : ' style="display: none;"';
+            var statusHtml = check.static
+                ? '<i class="fas fa-spinner fa-spin fpp-health-check__status-icon fpp-status--loading"></i>' +
+                  '<span class="fpp-health-check__status-text">Checking...</span>'
+                : '';
+            return '<li class="fpp-health-check__item" data-check="' + check.id + '"' + hiddenStyle + '>' +
+                '<span class="fpp-health-check__label">' +
+                '<i class="fas ' + check.icon + '"></i> ' + check.label +
+                '</span>' +
+                '<span class="fpp-health-check__status" id="hc-' + check.id + '">' +
+                statusHtml +
+                '</span>' +
+                '</li>';
+        }
+
+        function StartHealthCheck() {
+            $('#btnStartHealthCheck').prop('disabled', true);
+            $('#btnStartHealthCheck i').addClass('fa-spin');
+
+            // Reset tracking for new health check run
+            receivedChecks = {};
+
+            // Build layout with pre-rendered placeholders
+            var leftHtml = healthChecks.left.map(renderPlaceholder).join('');
+            var rightHtml = healthChecks.right.map(renderPlaceholder).join('');
+
+            $('#healthCheckOutput').html(
+                '<div class="fpp-health-summary">' +
+                '<div class="fpp-health-summary__item">' +
+                '<span class="fpp-health-summary__count fpp-status--pass" id="hcPassCount">-</span>' +
+                '<span class="fpp-health-summary__label">Passed</span>' +
+                '</div>' +
+                '<div class="fpp-health-summary__item">' +
+                '<span class="fpp-health-summary__count fpp-status--warn" id="hcWarnCount">-</span>' +
+                '<span class="fpp-health-summary__label">Warnings</span>' +
+                '</div>' +
+                '<div class="fpp-health-summary__item">' +
+                '<span class="fpp-health-summary__count fpp-status--fail" id="hcFailCount">-</span>' +
+                '<span class="fpp-health-summary__label">Issues</span>' +
+                '</div>' +
+                '</div>' +
+                '<div class="row">' +
+                '<div class="col-lg-6"><ul class="fpp-health-check" id="healthCheckLeft">' + leftHtml + '</ul></div>' +
+                '<div class="col-lg-6"><ul class="fpp-health-check" id="healthCheckRight">' + rightHtml + '</ul></div>' +
+                '</div>'
+            );
+
+            var timestamp = Math.floor(Date.now() / 1000);
+
+            fetch('healthCheckSSE.php?timestamp=' + timestamp, { credentials: 'same-origin' })
+                .then(function(response) {
+                    if (!response.ok) throw new Error('HTTP ' + response.status);
+                    var reader = response.body.getReader();
+                    var decoder = new TextDecoder();
+                    var buffer = '';
+
+                    function processStream() {
+                        reader.read().then(function(result) {
+                            if (result.done) {
+                                HealthCheckDone();
+                                return;
+                            }
+
+                            buffer += decoder.decode(result.value, { stream: true });
+                            var lines = buffer.split('\n');
+                            buffer = lines.pop();
+
+                            lines.forEach(function(line) {
+                                if (line.startsWith('data: ')) {
+                                    try {
+                                        var check = JSON.parse(line.substring(6));
+                                        if (check.id === 'done') {
+                                            updateHealthSummary(check.summary);
+                                        } else {
+                                            updateHealthCheckItem(check);
+                                        }
+                                    } catch (e) { }
+                                }
+                            });
+
+                            processStream();
+                        }).catch(function() {
+                            HealthCheckDone();
+                        });
+                    }
+
+                    processStream();
+                })
+                .catch(function() {
+                    HealthCheckDone();
+                    $('#healthCheckOutput').html('<div class="alert alert-danger">Failed to run health check</div>');
+                });
+        }
+
+        // Updates gauge with thresholds: { yellow: 60, red: 80, max: 100, unit: '%' }
+        function updateGauge(gaugeId, value, thresholds) {
+            var fillElement = document.getElementById(gaugeId + 'Fill');
+            var valueElement = document.getElementById(gaugeId.replace('Gauge', 'Value'));
+            if (!fillElement) return;
+
+            var normalizedValue = thresholds.max
+                ? Math.min((value / thresholds.max) * 100, 100)
+                : value;
+
+            // Calculate stroke-dasharray (circumference = 2 * π * 45 ≈ 282.7)
+            var dashArray = (normalizedValue * 2.827).toFixed(1) + ' 282.7';
+            fillElement.setAttribute('stroke-dasharray', dashArray);
+
+            // Update color class based on thresholds
+            fillElement.classList.remove('fpp-gauge__fill--success', 'fpp-gauge__fill--warning', 'fpp-gauge__fill--danger');
+            if (value > thresholds.red) {
+                fillElement.classList.add('fpp-gauge__fill--danger');
+            } else if (value > thresholds.yellow) {
+                fillElement.classList.add('fpp-gauge__fill--warning');
+            } else {
+                fillElement.classList.add('fpp-gauge__fill--success');
             }
 
-            // Value arc
-            var valueAngle = startAngle + (totalAngle * (normalizedValue / 100));
-            var valuePath = describeArc(centerX, centerY, radius, startAngle, valueAngle);
-            svg.innerHTML += '<path d="' + valuePath + '" fill="none" stroke="' + color + '" stroke-width="12"/>';
-
-            // Center text
-            svg.innerHTML += '<text x="' + centerX + '" y="' + (centerY - 5) + '" text-anchor="middle" font-size="24" font-weight="bold" fill="' + color + '">' + displayValue.toFixed(0) + '</text>';
-            svg.innerHTML += '<text x="' + centerX + '" y="' + (centerY + 15) + '" text-anchor="middle" font-size="14" fill="#666">' + unit + '</text>';
-        }
-
-        function describeArc(x, y, radius, startAngle, endAngle) {
-            var start = polarToCartesian(x, y, radius, endAngle);
-            var end = polarToCartesian(x, y, radius, startAngle);
-            var largeArcFlag = endAngle - startAngle <= Math.PI ? "0" : "1";
-            return "M " + start.x + " " + start.y + " A " + radius + " " + radius + " 0 " + largeArcFlag + " 0 " + end.x + " " + end.y;
-        }
-
-        function polarToCartesian(centerX, centerY, radius, angleInRadians) {
-            return {
-                x: centerX + (radius * Math.cos(angleInRadians)),
-                y: centerY + (radius * Math.sin(angleInRadians))
-            };
+            if (valueElement) {
+                valueElement.textContent = value.toFixed(0) + thresholds.unit;
+            }
         }
 
         function updateUptimeDisplay() {
@@ -263,10 +253,10 @@
                     <?php if (isset($settings['temperatureInF']) && $settings['temperatureInF'] == 1) { ?>
                         temp = (temp * 9 / 5) + 32;
                         // Fahrenheit thresholds: 140°F (60°C), 176°F (80°C), max 212°F (100°C)
-                        drawGauge('tempGauge', temp, 'Temperature', '°F', { yellow: 140, red: 176, max: 212 });
+                        updateGauge('tempGauge', temp, { yellow: 140, red: 176, max: 212, unit: '°' });
                     <?php } else { ?>
                         // Celsius thresholds: 60°C, 80°C, max 100°C
-                        drawGauge('tempGauge', temp, 'Temperature', '°C', { yellow: 60, red: 80, max: 100 });
+                        updateGauge('tempGauge', temp, { yellow: 60, red: 80, max: 100, unit: '°' });
                     <?php } ?>
                 }
 
@@ -277,10 +267,6 @@
                     if (!uptimeInterval) {
                         uptimeInterval = setInterval(updateUptimeDisplay, 1000);
                     }
-                }
-
-                if (data.uptimeStr) {
-                    $('#uptime-started').text('Started: ' + data.uptimeStr);
                 }
 
                 // Load Average - get from PHP
@@ -322,12 +308,12 @@
             $.get('api/system/info', function (data) {
                 // CPU Usage
                 if (data.Utilization && data.Utilization.CPU !== undefined) {
-                    drawGauge('cpuGauge', parseFloat(data.Utilization.CPU), 'CPU', '%');
+                    updateGauge('cpuGauge', parseFloat(data.Utilization.CPU), { yellow: 60, red: 80, unit: '%' });
                 }
 
                 // Memory Usage
                 if (data.Utilization && data.Utilization.Memory !== undefined) {
-                    drawGauge('memGauge', parseFloat(data.Utilization.Memory), 'Memory', '%');
+                    updateGauge('memGauge', parseFloat(data.Utilization.Memory), { yellow: 60, red: 80, unit: '%' });
                 }
             });
 
@@ -397,8 +383,8 @@
                 $('#media-bar').css('width', mediaPct + '%').attr('aria-valuenow', mediaPct);
                 updateDiskColor($('#media-bar'), mediaPct);
 
+                // Show disk warning if media or root partition is over 85%
                 if (mediaPct > 85 || rootPct > 85) {
-                    $('#disk-warning-content').html('<strong><i class="fas fa-exclamation-triangle"></i> High Disk Usage Detected!</strong> Your disk is running low on space. Consider cleaning up old files in the <a href="filemanager.php" class="alert-link">File Manager</a>.');
                     $('#disk-warning').show();
                 } else {
                     $('#disk-warning').hide();
@@ -406,8 +392,8 @@
             <?php } else { ?>
                 $('#media-row').hide();
 
+                // Show disk warning if root partition is over 85%
                 if (rootPct > 85) {
-                    $('#disk-warning-content').html('<strong><i class="fas fa-exclamation-triangle"></i> High Disk Usage Detected!</strong> Your disk is running low on space. Consider cleaning up old files in the <a href="filemanager.php" class="alert-link">File Manager</a>.');
                     $('#disk-warning').show();
                 } else {
                     $('#disk-warning').hide();
@@ -520,7 +506,7 @@
                 <?php
                 if (isset($settings["UnpartitionedSpace"]) && $settings["UnpartitionedSpace"] > 0) {
                     ?>
-                    <div id='upgradeFlag' class="alert alert-danger" role="alert">
+                    <div id='upgradeFlag' class="fpp-alert fpp-alert--danger" role="alert">
                         SD card has unused space. Go to
                         <a href="settings.php#settings-storage">Storage Settings</a> to expand the
                         file system or create a new storage partition.
@@ -528,49 +514,86 @@
                     <?php
                 }
                 ?>
+                
+                <!-- Disk Space Warning Banner -->
+                <div id="disk-warning" class="fpp-alert fpp-alert--danger" role="alert" style="display: none;">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <span>
+                        <strong>High Disk Usage Detected!</strong>
+                        Your disk is running low on space. Consider cleaning up old files in the
+                        <a href="filemanager.php">File Manager</a>.
+                    </span>
+                </div>
 
                 <!-- Health Check Section -->
-                <div class="card compact-card">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <h3><i class="fas fa-heartbeat"></i> Health Check</h3>
-                        <button id='btnStartHealthCheck' class='btn btn-sm btn-primary'
-                            onClick='StartHealthCheck();'>Run Health Check</button>
+                <div class="card compact-card health-check-card">
+                    <button class="fpp-health-rerun-btn" id="btnStartHealthCheck" onclick="StartHealthCheck();">
+                        <i class="fas fa-sync-alt"></i> Re-run
+                    </button>
+                    <div class="card-header">
+                        <h3><i class="fa-solid fa-stethoscope"></i> System Health</h3>
                     </div>
                     <div class="card-body">
                         <div id='healthCheckOutput'></div>
                     </div>
                 </div>
 
-                <!-- Disk Space Warning Banner -->
-                <div id="disk-warning" class="alert alert-warning alert-dismissible fade show warning-banner"
-                    role="alert" style="display: none;">
-                    <div id="disk-warning-content"></div>
-                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-                </div>
-
                 <!-- System Monitoring Gauges -->
                 <div class="row">
                     <div class="col-md-4">
-                        <div class="card compact-card">
-                            <div class="card-body gauge-container">
-                                <svg id="cpuGauge" class="gauge-svg" viewBox="0 0 150 150"></svg>
-                                <div class="gauge-label">CPU Usage</div>
+                        <div class="card compact-card fpp-gauge">
+                            <div class="card-header">
+                                <h5><i class="fa-solid fa-microchip"></i> CPU Usage</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="fpp-gauge__container">
+                                    <div class="fpp-gauge__circle">
+                                        <svg viewBox="0 0 100 100">
+                                            <circle class="fpp-gauge__bg" cx="50" cy="50" r="45"></circle>
+                                            <circle class="fpp-gauge__fill fpp-gauge__fill--success" id="cpuGaugeFill" cx="50" cy="50" r="45" stroke-dasharray="0 282.7"></circle>
+                                        </svg>
+                                        <div class="fpp-gauge__value" id="cpuValue">--%</div>
+                                    </div>
+                                </div>
+                                <div class="fpp-gauge__label">Current CPU</div>
                             </div>
                         </div>
                     </div>
                     <div class="col-md-4">
-                        <div class="card compact-card">
-                            <div class="card-body gauge-container">
-                                <svg id="memGauge" class="gauge-svg" viewBox="0 0 150 150"></svg>
-                                <div class="gauge-label">Memory Usage</div>
+                        <div class="card compact-card fpp-gauge">
+                            <div class="card-header">
+                                <h5><i class="fa-solid fa-memory"></i> Memory Usage</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="fpp-gauge__container">
+                                    <div class="fpp-gauge__circle">
+                                        <svg viewBox="0 0 100 100">
+                                            <circle class="fpp-gauge__bg" cx="50" cy="50" r="45"></circle>
+                                            <circle class="fpp-gauge__fill fpp-gauge__fill--success" id="memGaugeFill" cx="50" cy="50" r="45" stroke-dasharray="0 282.7"></circle>
+                                        </svg>
+                                        <div class="fpp-gauge__value" id="memValue">--%</div>
+                                    </div>
+                                </div>
+                                <div class="fpp-gauge__label">RAM Utilization</div>
                             </div>
                         </div>
                     </div>
                     <div class="col-md-4">
-                        <div class="card compact-card">
-                            <div class="card-body gauge-container">
-                                <svg id="tempGauge" class="gauge-svg" viewBox="0 0 150 150"></svg>
-                                <div class="gauge-label">Temperature</div>
+                        <div class="card compact-card fpp-gauge">
+                            <div class="card-header">
+                                <h5><i class="fa-solid fa-temperature-half"></i> Temperature</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="fpp-gauge__container">
+                                    <div class="fpp-gauge__circle">
+                                        <svg viewBox="0 0 100 100">
+                                            <circle class="fpp-gauge__bg" cx="50" cy="50" r="45"></circle>
+                                            <circle class="fpp-gauge__fill fpp-gauge__fill--success" id="tempGaugeFill" cx="50" cy="50" r="45" stroke-dasharray="0 282.7"></circle>
+                                        </svg>
+                                        <div class="fpp-gauge__value" id="tempValue">--°</div>
+                                    </div>
+                                </div>
+                                <div class="fpp-gauge__label" id="tempLabel">CPU Temperature</div>
                             </div>
                         </div>
                     </div>
@@ -607,11 +630,11 @@
 
                 <!-- Second Row: Uptime, Load Average, Player Stats -->
                 <div class="row">
-                    <!-- System Uptime -->
+                    <!-- FPP Uptime -->
                     <div class="col-md-4">
                         <div class="card compact-card">
                             <div class="card-header">
-                                <h3><i class="fas fa-clock"></i> System Uptime</h3>
+                                <h3><i class="fas fa-clock"></i> FPP Uptime</h3>
                             </div>
                             <div class="card-body uptime-display">
                                 <div class="uptime-counters">
@@ -619,29 +642,35 @@
                                         <div class="uptime-number" id="uptime-days">00</div>
                                         <div class="uptime-label">Days</div>
                                     </div>
-                                    <div class="uptime-segment">
-                                        <div class="uptime-number">:</div>
-                                    </div>
+                                    <div class="uptime-separator">:</div>
                                     <div class="uptime-segment">
                                         <div class="uptime-number" id="uptime-hours">00</div>
                                         <div class="uptime-label">Hours</div>
                                     </div>
-                                    <div class="uptime-segment">
-                                        <div class="uptime-number">:</div>
-                                    </div>
+                                    <div class="uptime-separator">:</div>
                                     <div class="uptime-segment">
                                         <div class="uptime-number" id="uptime-minutes">00</div>
                                         <div class="uptime-label">Minutes</div>
                                     </div>
-                                    <div class="uptime-segment">
-                                        <div class="uptime-number">:</div>
-                                    </div>
+                                    <div class="uptime-separator">:</div>
                                     <div class="uptime-segment">
                                         <div class="uptime-number" id="uptime-seconds">00</div>
                                         <div class="uptime-label">Seconds</div>
                                     </div>
                                 </div>
-                                <div class="uptime-started" id="uptime-started">--</div>
+                                <?php
+                                $lastBoot = "";
+                                if ($settings["Platform"] != "MacOS") {
+                                    $lastBoot = exec("uptime -s", $output, $return_val);
+                                    if ($return_val != 0) {
+                                        $lastBoot = "";
+                                    }
+                                    unset($output);
+                                }
+                                if ($lastBoot != "") {
+                                ?>
+                                <div class="uptime-started"><i class="fas fa-power-off"></i> System started: <?php echo $lastBoot; ?></div>
+                                <?php } ?>
                             </div>
                         </div>
                     </div>
@@ -692,8 +721,8 @@
                                         </div>
                                     </div>
                                 </div>
-                                <div class="text-center mt-2">
-                                    <small class="text-muted"><span id="cpu-cores">--</span> CPU cores available</small>
+                                <div class="load-avg-info">
+                                    <i class="fas fa-microchip"></i> <span id="cpu-cores">--</span> CPU cores available
                                 </div>
                             </div>
                         </div>
@@ -705,7 +734,7 @@
                             <div class="card-header">
                                 <h3><i class="fas fa-chart-bar"></i> Player Statistics</h3>
                             </div>
-                            <div class="card-body" style="padding: 8px;">
+                            <div class="card-body">
                                 <a href="scheduler.php" class="stat-link">
                                     <span class="stat-name">Schedules</span>
                                     <span class="stat-count" id="stat-schedules">0</span>

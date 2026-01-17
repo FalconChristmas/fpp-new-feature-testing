@@ -1,0 +1,1133 @@
+/* ==========================================================================
+   FPP Standard Design System
+   Standard reusable design tokens and components
+   ========================================================================== */
+
+:root {
+    /* ==========================================================================
+       COLOR TOKENS: Extracted from FPP Bootstrap theme and inline styles
+       ========================================================================== */
+
+    /* Primary Colors - FPP actual color palette from fpp.css */
+    --fpp-primary: #007bff;
+    --fpp-primary-hover: #0056b3;
+    --fpp-success: #56b760;
+    /* FPP green (playlist playing, installed plugins) */
+    --fpp-success-dark: #449c4d;
+    --fpp-success-light: #e8f5e9;
+    --fpp-warning: #f2bc5f;
+    /* FPP amber (untested plugins) */
+    --fpp-warning-dark: #d9a84e;
+    --fpp-warning-light: #fef8e8;
+    --fpp-danger: #f63939;
+    /* FPP red (menu hover, incompatible) */
+    --fpp-danger-dark: #d92d2d;
+    --fpp-danger-light: #fde8e8;
+    --fpp-info: #6b95ec;
+    /* FPP blue (available plugins) */
+    --fpp-info-light: #e8f0fd;
+
+    /* Neutral Colors - Text */
+    --fpp-text-primary: #333;
+    --fpp-text-secondary: #666;
+    --fpp-text-muted: #999;
+    --fpp-text-light: #adb5bd;
+
+    /* Neutral Colors - Backgrounds */
+    --fpp-bg-page: #f8f9fa;
+    --fpp-bg-card: #ffffff;
+    --fpp-bg-hover: #f8f9fa;
+    --fpp-bg-disabled: #e9ecef;
+
+    /* Neutral Colors - Borders */
+    --fpp-border: #ddd;
+    --fpp-border-light: #eee;
+    --fpp-border-medium: #dee2e6;
+    --fpp-border-dark: #ced4da;
+
+    /* Neutral Colors - Grays */
+    --fpp-gray: #6c757d;
+    /* Bootstrap secondary gray */
+
+    /* Alert Text Colors */
+    --fpp-success-text: #155724;
+    --fpp-warning-text: #856404;
+    --fpp-info-text: #0c5460;
+
+    /* ==========================================================================
+       SPACING TOKENS: Bootstrap-compatible spacing scale
+       ========================================================================== */
+
+    /* Bootstrap Spacing (use with margin/padding utilities) */
+    --fpp-spacing-1: 0.25rem;
+    /* 4px  - Bootstrap $spacer * .25 */
+    --fpp-spacing-2: 0.5rem;
+    /* 8px  - Bootstrap $spacer * .5 */
+    --fpp-spacing-3: 1rem;
+    /* 16px - Bootstrap $spacer */
+    --fpp-spacing-4: 1.5rem;
+    /* 24px - Bootstrap $spacer * 1.5 */
+    --fpp-spacing-5: 3rem;
+    /* 48px - Bootstrap $spacer * 3 */
+
+    /* Common Spacing Values */
+    --fpp-sp-xs: 5px;
+    --fpp-sp-sm: 10px;
+    --fpp-sp-md: 15px;
+    --fpp-sp-lg: 20px;
+    --fpp-sp-xl: 25px;
+    --fpp-sp-2xl: 30px;
+
+    /* ==========================================================================
+       TYPOGRAPHY TOKENS: FPP font sizes
+       ========================================================================== */
+
+    /* Font Sizes */
+    --fpp-fs-xs: 0.75em;
+    /* 12px Small labels, captions */
+    --fpp-fs-sm: 0.85em;
+    /* 13.6px Secondary text */
+    --fpp-fs-base: 0.9em;
+    /* 14.4px Body text */
+    --fpp-fs-md: 1em;
+    /* 16px Standard text */
+    --fpp-fs-lg: 1.1em;
+    /* 17.6px Emphasized text */
+    --fpp-fs-xl: 1.5em;
+    /* 24px Headings */
+    --fpp-fs-2xl: 1.8em;
+    /* 28.8px Large headings */
+    --fpp-fs-3xl: 2em;
+    /* 32px Hero text */
+
+    /* Font Weights */
+    --fpp-fw-normal: 400;
+    --fpp-fw-medium: 500;
+    --fpp-fw-semibold: 600;
+    --fpp-fw-bold: 700;
+
+    /* Font Families */
+    --fpp-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --fpp-font-mono: SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+
+    /* ==========================================================================
+       BORDER RADIUS TOKENS
+       ========================================================================== */
+
+    --fpp-radius-sm: 4px;
+    --fpp-radius-md: 5px;
+    --fpp-radius-lg: 8px;
+    --fpp-radius-xl: 0.5rem;
+    /* Bootstrap .rounded */
+    --fpp-radius-pill: 50rem;
+    /* Bootstrap .rounded-pill */
+
+    /* ==========================================================================
+       SHADOW TOKENS: Subtle elevation system
+       ========================================================================== */
+
+    --fpp-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.12);
+    --fpp-shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1);
+    --fpp-shadow-lg: 0 8px 16px rgba(0, 0, 0, 0.15);
+
+    /* ==========================================================================
+       TRANSITION TOKENS: Consistent FPP transitions
+       ========================================================================== */
+
+    --fpp-transition-fast: 0.15s ease;
+    --fpp-transition-normal: 0.3s ease;
+    --fpp-transition-slow: 0.5s ease;
+
+    /* ==========================================================================
+       Z-INDEX TOKENS: Stacking order
+       ========================================================================== */
+
+    --fpp-z-dropdown: 1000;
+    --fpp-z-sticky: 1020;
+    --fpp-z-fixed: 1030;
+    --fpp-z-modal-backdrop: 1040;
+    --fpp-z-modal: 1050;
+    --fpp-z-popover: 1060;
+    --fpp-z-tooltip: 1070;
+
+    /* ==========================================================================
+       Standard FPP COMPONENT TOKENS
+       ========================================================================== */
+
+    /* Progress Bars */
+    --fpp-progress-height: 1rem;
+    --fpp-progress-bg: #e9ecef;
+    --fpp-progress-radius: var(--fpp-radius-md);
+
+    /* Cards */
+    --fpp-card-padding: 20px;
+    --fpp-card-padding-compact: 15px;
+    --fpp-card-border: 1px solid var(--fpp-border);
+    --fpp-card-border-compact: 2px solid var(--fpp-border);
+    --fpp-card-radius: var(--fpp-radius-lg);
+
+    /* Gauges */
+    --fpp-gauge-size: 150px;
+    --fpp-gauge-stroke-width: 12;
+    --fpp-gauge-bg-color: #e9ecef;
+
+    /* Buttons */
+    --fpp-btn-padding-y: 0.375rem;
+    --fpp-btn-padding-x: 0.75rem;
+    --fpp-btn-font-size: 1rem;
+    --fpp-btn-border-radius: var(--fpp-radius-md);
+
+    /* Alerts/Banners */
+    --fpp-alert-padding: 20px;
+    --fpp-alert-border-width: 2px;
+    --fpp-alert-radius: var(--fpp-radius-lg);
+}
+
+/* ==========================================================================
+   UTILITY: Standard FPP Color Classes
+   ========================================================================== */
+
+.fpp-text-primary {
+    color: var(--fpp-primary) !important;
+}
+
+.fpp-text-success {
+    color: var(--fpp-success) !important;
+}
+
+.fpp-text-warning {
+    color: var(--fpp-warning) !important;
+}
+
+.fpp-text-danger {
+    color: var(--fpp-danger) !important;
+}
+
+.fpp-text-info {
+    color: var(--fpp-info) !important;
+}
+
+.fpp-text-muted {
+    color: var(--fpp-text-muted) !important;
+}
+
+.fpp-text-secondary {
+    color: var(--fpp-text-secondary) !important;
+}
+
+.fpp-bg-primary {
+    background-color: var(--fpp-primary) !important;
+}
+
+.fpp-bg-success {
+    background-color: var(--fpp-success) !important;
+}
+
+.fpp-bg-warning {
+    background-color: var(--fpp-warning) !important;
+}
+
+.fpp-bg-danger {
+    background-color: var(--fpp-danger) !important;
+}
+
+.fpp-bg-info {
+    background-color: var(--fpp-info) !important;
+}
+
+.fpp-bg-light {
+    background-color: var(--fpp-bg-page) !important;
+}
+
+.fpp-bg-white {
+    background-color: var(--fpp-bg-card) !important;
+}
+
+/* ==========================================================================
+   UTILITY: Common Patterns
+   ========================================================================== */
+
+/* Icon with spacing,used in info footers */
+.fpp-icon-text i,
+.uptime-started i,
+.load-avg-info i {
+    margin-right: 6px;
+    opacity: 0.7;
+}
+
+/* ==========================================================================
+   FPP COMPONENT LIBRARY
+   Reusable UI components for FPP system pages
+   ========================================================================== */
+
+/* ==========================================================================
+   COMPACT CARDS: Tighter spacing, used on system pages
+   ========================================================================== */
+.compact-card {
+    margin-bottom: 15px;
+}
+
+.compact-card .card-body {
+    padding: 15px;
+}
+
+.compact-card .card-header h3 {
+    font-size: 1.1em;
+    margin: 0;
+}
+
+/* ==========================================================================
+   DISK UTILIZATION COMPONENTS
+   ========================================================================== */
+.disk-row {
+    margin-bottom: 15px;
+}
+
+.disk-row:last-child {
+    margin-bottom: 0;
+}
+
+.disk-label {
+    font-size: 0.9em;
+    margin-bottom: 5px;
+    display: flex;
+    justify-content: space-between;
+}
+
+.disk-device {
+    color: var(--fpp-text-secondary);
+    font-weight: 600;
+}
+
+.disk-info {
+    color: var(--fpp-text-muted);
+    font-size: 0.85em;
+}
+
+/* Pill shaped */
+.disk-row .progress {
+    height: 24px;
+    border-radius: 12px;
+    background-color: var(--fpp-progress-bg);
+}
+
+.disk-row .progress-bar {
+    border-radius: 12px;
+    font-size: 0.8em;
+    font-weight: 600;
+    line-height: 24px;
+}
+
+/* ==========================================================================
+   UPTIME DISPLAY COMPONENTS
+   ========================================================================== */
+.uptime-display {
+    text-align: center;
+    padding: 20px;
+}
+
+.uptime-counters {
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    gap: 4px;
+    margin-bottom: 15px;
+}
+
+.uptime-segment {
+    text-align: center;
+    flex: 0 0 auto;
+}
+
+.uptime-number {
+    font-size: 2em;
+    font-weight: bold;
+    color: var(--fpp-primary);
+    line-height: 1;
+}
+
+.uptime-label {
+    font-size: 0.6em;
+    color: var(--fpp-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    margin-top: 4px;
+    white-space: nowrap;
+}
+
+.uptime-separator {
+    font-size: 2em;
+    font-weight: bold;
+    color: var(--fpp-text-muted);
+    line-height: 1;
+    padding: 0 2px;
+}
+
+.uptime-started {
+    color: var(--fpp-text-muted);
+    font-size: 0.85em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Scale down uptime counters when in narrow column (col-md-4 on medium screens) */
+@media (min-width: 768px) and (max-width: 1199px) {
+    .uptime-display {
+        padding: 15px 10px;
+    }
+
+    .uptime-counters {
+        gap: 2px;
+    }
+
+    .uptime-number,
+    .uptime-separator {
+        font-size: 1.4em;
+    }
+
+    .uptime-label {
+        font-size: 0.5em;
+    }
+
+    .uptime-started {
+        font-size: 0.75em;
+    }
+}
+
+/* ==========================================================================
+   LOAD AVERAGE COMPONENTS
+   ========================================================================== */
+.load-bar-container {
+    margin-bottom: 12px;
+}
+
+.load-bar-container:last-of-type {
+    margin-bottom: 0;
+}
+
+.load-label {
+    font-size: 0.85em;
+    margin-bottom: 4px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.load-label span:first-child {
+    color: var(--fpp-text-secondary);
+}
+
+.load-label span:last-child {
+    font-weight: 600;
+    color: var(--fpp-text-primary);
+    font-family: var(--fpp-font-mono);
+}
+
+/* Pill shaped */
+.load-bar-container .progress {
+    height: 10px;
+    border-radius: 5px;
+    background-color: var(--fpp-progress-bg);
+}
+
+.load-bar-container .progress-bar {
+    border-radius: 5px;
+}
+
+/* Load average info footer */
+.load-avg-info {
+    text-align: center;
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid var(--fpp-border-light);
+    font-size: 0.8em;
+    color: var(--fpp-text-muted);
+}
+
+/* ==========================================================================
+   STAT COMPONENTS: Clickable stat rows
+   ========================================================================== */
+.stat-link {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 10px;
+    margin-bottom: 2px;
+    border-radius: var(--fpp-radius-sm);
+    text-decoration: none;
+    color: inherit;
+    transition: background-color var(--fpp-transition-fast);
+    border-bottom: 1px solid var(--fpp-border-light);
+}
+
+.stat-link:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+}
+
+.stat-link:hover {
+    background-color: var(--fpp-bg-page);
+    color: inherit;
+}
+
+.stat-name {
+    color: var(--fpp-text-secondary);
+    font-size: 0.9em;
+}
+
+.stat-count {
+    font-weight: 600;
+    color: var(--fpp-primary);
+    font-family: var(--fpp-font-mono);
+}
+
+/* ==========================================================================
+   FPP ALERT COMPONENT - Reusable alert/banner system
+   Matches FPP existing Bootstrap alert patterns
+   ========================================================================== */
+
+/* Base alert: matches Bootstrap .alert structure */
+.fpp-alert {
+    position: relative;
+    padding: 1.35rem 1.8rem;
+    margin-bottom: 1rem;
+    border: 1px solid transparent;
+    border-radius: var(--fpp-radius-lg);
+    font-size: 0.95rem;
+    line-height: 1.5;
+    clear: both;
+}
+
+/* Danger/Warning variant, uses FPP red #f63939 */
+.fpp-alert--danger {
+    color: #fff;
+    background-color: var(--fpp-danger);
+    border-color: var(--fpp-danger);
+}
+
+.fpp-alert--danger a,
+.fpp-alert--danger .alert-link {
+    color: #fff;
+    font-weight: 600;
+    text-decoration: underline;
+}
+
+.fpp-alert--danger a:hover,
+.fpp-alert--danger .alert-link:hover {
+    color: rgba(255, 255, 255, 0.85);
+}
+
+/* Warning variant - yellow/amber */
+.fpp-alert--warning {
+    color: var(--fpp-warning-text);
+    background-color: var(--fpp-warning-light);
+    border-color: var(--fpp-warning);
+}
+
+/* Success variant */
+.fpp-alert--success {
+    color: var(--fpp-success-text);
+    background-color: var(--fpp-success-light);
+    border-color: var(--fpp-success);
+}
+
+/* Info variant */
+.fpp-alert--info {
+    color: var(--fpp-info-text);
+    background-color: var(--fpp-info-light);
+    border-color: var(--fpp-info);
+}
+
+/* Compact modifier, tighter padding for inline alerts */
+.fpp-alert--compact {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0.9375rem 1.25rem;
+    font-size: 0.9rem;
+}
+
+.fpp-alert--compact i {
+    font-size: 1.25em;
+    flex-shrink: 0;
+}
+
+.fpp-alert--compact strong {
+    margin-right: 0.3125rem;
+}
+
+/* ==========================================================================
+   VERSION INDICATOR COMPONENTS
+   ========================================================================== */
+.version-indicator {
+    background-color: var(--fpp-bg-disabled);
+    border: 2px solid var(--fpp-success);
+    border-radius: var(--fpp-radius-lg);
+    padding: 15px;
+    margin: 15px 0;
+    cursor: pointer;
+    transition: all var(--fpp-transition-normal);
+}
+
+.version-indicator:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--fpp-shadow-md);
+    border-color: var(--fpp-success-dark);
+}
+
+.version-indicator.os-version {
+    border-color: var(--fpp-warning);
+}
+
+.version-indicator.os-version:hover {
+    border-color: var(--fpp-warning-dark);
+}
+
+.version-indicator .version-progress {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    font-family: var(--fpp-font-mono);
+    font-weight: bold;
+}
+
+.version-indicator .version-arrow {
+    color: var(--fpp-gray);
+}
+
+.version-indicator .commits-behind {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.9em;
+    color: var(--fpp-gray);
+    margin-top: 5px;
+}
+
+/* ==========================================================================
+   UPGRADE PAGE COMPONENTS
+   ========================================================================== */
+.upgrade-card {
+    border: 2px solid var(--fpp-border);
+    border-radius: var(--fpp-radius-lg);
+    padding: 20px;
+    margin-bottom: 20px;
+    background-color: var(--fpp-bg-page);
+}
+
+.upgrade-card h3 {
+    color: var(--fpp-text-primary);
+    margin-bottom: 15px;
+}
+
+.upgrade-button {
+    width: 100%;
+    padding: 12px;
+    font-size: 1.1em;
+    margin-top: 10px;
+}
+
+.version-info {
+    background-color: var(--fpp-bg-card);
+    border: 1px solid var(--fpp-border);
+    border-radius: var(--fpp-radius-md);
+    padding: 15px;
+    margin-bottom: 20px;
+}
+
+.version-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--fpp-border-light);
+}
+
+.version-row:last-child {
+    border-bottom: none;
+}
+
+.version-label {
+    font-weight: 600;
+    color: var(--fpp-text-secondary);
+}
+
+.version-value {
+    color: var(--fpp-text-primary);
+}
+
+.update-badge {
+    font-size: 0.75em;
+    margin-left: 5px;
+}
+
+/* ==========================================================================
+   FAQ ACCORDION STYLING
+   ========================================================================== */
+.faq-accordion .accordion-button {
+    font-size: 0.85em;
+    padding: 0.6rem 0.85rem;
+    background-color: var(--fpp-bg-card);
+    border: none;
+    font-weight: 600;
+    color: var(--fpp-text-primary);
+    position: relative;
+    padding-right: 2.5rem;
+}
+
+.faq-accordion .accordion-button:not(.collapsed) {
+    background-color: var(--fpp-bg-page);
+    color: #000;
+    box-shadow: none;
+}
+
+.faq-accordion .accordion-button:focus {
+    box-shadow: none;
+    border-color: rgba(0, 0, 0, .125);
+}
+
+.faq-accordion .accordion-button::after {
+    content: '\f078';
+    font-family: 'Font Awesome 6 Free';
+    font-weight: 900;
+    position: absolute;
+    right: 0.85rem;
+    transition: transform var(--fpp-transition-fast);
+    font-size: 0.75em;
+}
+
+.faq-accordion .accordion-button:not(.collapsed)::after {
+    transform: rotate(180deg);
+}
+
+.fpp-accordion .accordion-body {
+    font-size: 0.85em;
+    padding: 0.85rem 1rem;
+    line-height: 1.5;
+    background-color: var(--fpp-bg-page);
+    color: #555;
+}
+
+.faq-accordion .accordion-item {
+    margin-bottom: 0.35rem;
+    border: 1px solid var(--fpp-border-medium);
+    border-radius: var(--fpp-radius-sm);
+    overflow: hidden;
+}
+
+.faq-accordion .accordion-item:last-child {
+    margin-bottom: 0;
+}
+
+/* ==========================================================================
+   UPDATE BANNERS
+   ========================================================================== */
+.update-banner {
+    padding: 20px;
+    border-radius: var(--fpp-radius-lg);
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.update-banner.fpp-update {
+    background-color: var(--fpp-success-light);
+    border: 2px solid var(--fpp-success);
+    color: var(--fpp-success-text);
+}
+
+.update-banner.os-update {
+    background-color: var(--fpp-warning-light);
+    border: 2px solid var(--fpp-warning);
+    color: var(--fpp-warning-text);
+}
+
+.update-banner i {
+    font-size: 2em;
+}
+
+.update-banner .banner-content h4 {
+    margin: 0 0 5px 0;
+}
+
+.update-banner .banner-content p {
+    margin: 0;
+}
+
+/* ==========================================================================
+   VERSION HEADER
+   ========================================================================== */
+.version-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 25px;
+    border-radius: var(--fpp-radius-lg);
+    margin-bottom: 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.version-header h2 {
+    margin: 0;
+    font-size: 1.8em;
+}
+
+.version-header .git-hash {
+    font-family: var(--fpp-font-mono);
+    opacity: 0.9;
+    font-size: 0.9em;
+}
+
+/* ==========================================================================
+   COMPARISON TABLE
+   ========================================================================== */
+.comparison-table {
+    margin: 30px 0;
+}
+
+.comparison-table table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.comparison-table th {
+    background-color: var(--fpp-bg-page);
+    padding: 15px;
+    text-align: left;
+    border-bottom: 2px solid var(--fpp-border-medium);
+}
+
+.comparison-table td {
+    padding: 12px 15px;
+    border-bottom: 1px solid var(--fpp-border-medium);
+}
+
+.comparison-table tr:last-child td {
+    border-bottom: none;
+}
+
+.comparison-table .feature-name {
+    font-weight: bold;
+}
+
+/* ==========================================================================
+   RESOURCES CARD
+   ========================================================================== */
+.resources-card {
+    background-color: var(--fpp-bg-page);
+    border: 1px solid var(--fpp-border);
+    border-radius: var(--fpp-radius-md);
+    padding: 20px;
+}
+
+.resources-card h3 {
+    margin-bottom: 15px;
+}
+
+.resources-card ul {
+    list-style: none;
+    padding-left: 0;
+}
+
+.resources-card ul li {
+    padding: 5px 0;
+}
+
+.resources-card ul li i {
+    width: 20px;
+    text-align: center;
+}
+
+/* ==========================================================================
+   ADVANCED OPTIONS CARD
+   ========================================================================== */
+.advanced-card {
+    background-color: var(--fpp-bg-page);
+    border: 2px solid var(--fpp-gray);
+    border-radius: var(--fpp-radius-lg);
+    padding: 20px;
+    margin-top: 20px;
+}
+
+.advanced-card h4 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.badge.recommended {
+    background-color: var(--fpp-success);
+}
+
+.badge.advanced {
+    background-color: var(--fpp-gray);
+}
+
+/* ==========================================================================
+   HEALTH CHECK
+   ========================================================================== */
+.fpp-health-summary {
+    display: flex;
+    justify-content: space-around;
+    padding: 8px 0;
+    margin-bottom: 10px;
+    border-bottom: 1px solid var(--fpp-border);
+    min-height: 52px;
+    box-sizing: border-box;
+}
+
+.fpp-health-summary__item {
+    text-align: center;
+    min-width: 60px;
+}
+
+.fpp-health-summary__count {
+    font-size: 1.25rem;
+    font-weight: bold;
+    display: block;
+    line-height: 1.2;
+    min-width: 2ch;
+    text-align: center;
+}
+
+.fpp-health-summary__count--success {
+    color: var(--fpp-success);
+}
+
+.fpp-health-summary__count--warning {
+    color: var(--fpp-warning);
+}
+
+.fpp-health-summary__count--danger {
+    color: var(--fpp-danger);
+}
+
+.fpp-health-summary__label {
+    font-size: 0.65rem;
+    color: var(--fpp-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+/* Health Check List Items */
+.fpp-health-check {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    min-height: 0;
+    width: 100%;
+    overflow: hidden;
+}
+
+/* Ensure columns containing health checks don't overflow */
+.health-check-card .row>[class*="col-"] {
+    overflow: hidden;
+}
+
+.fpp-health-check__item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--fpp-border-light);
+    font-size: 0.8rem;
+    min-height: 28px;
+    box-sizing: border-box;
+    overflow: hidden;
+    width: 100%;
+}
+
+/* Remove border from last item only on large screens where columns are side-by-side */
+@media (min-width: 992px) {
+    .fpp-health-check__item:last-child {
+        border-bottom: none;
+    }
+}
+
+.fpp-health-check__label {
+    display: flex;
+    align-items: center;
+    color: var(--fpp-text-secondary);
+    flex: 0 0 auto;
+}
+
+.fpp-health-check__label i {
+    width: 16px;
+    margin-right: 10px;
+    color: var(--fpp-text-muted);
+    text-align: center;
+    font-size: 0.75rem;
+    flex-shrink: 0;
+}
+
+.fpp-health-check__status {
+    display: flex;
+    align-items: center;
+    font-size: 0.75rem;
+    flex: 1 1 auto;
+    justify-content: flex-end;
+    margin-left: 15px;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.fpp-health-check__status-icon {
+    font-size: 0.8rem;
+    margin-right: 6px;
+    flex-shrink: 0;
+    width: 14px;
+    text-align: center;
+}
+
+.fpp-health-check__status-text {
+    text-overflow: ellipsis;
+    overflow: hidden;
+    white-space: nowrap;
+    text-align: right;
+}
+
+/* Status Color Classes */
+.fpp-status--pass {
+    color: var(--fpp-success);
+}
+
+.fpp-status--warn {
+    color: var(--fpp-warning);
+}
+
+.fpp-status--fail {
+    color: var(--fpp-danger);
+}
+
+.fpp-status--loading {
+    color: var(--fpp-text-muted);
+}
+
+/* Health Rerun Button */
+.fpp-health-rerun-btn {
+    position: absolute;
+    top: 8px;
+    right: 12px;
+    padding: 4px 10px;
+    font-size: 0.7rem;
+    background: var(--fpp-bg, #f8f9fa);
+    border: 1px solid var(--fpp-border, #dee2e6);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    z-index: 10;
+}
+
+.fpp-health-rerun-btn:hover {
+    background: #e9ecef;
+    border-color: #ced4da;
+}
+
+.fpp-health-rerun-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.fpp-health-rerun-btn i {
+    margin-right: 4px;
+}
+
+/* Health Check Card (position context for rerun button) */
+.health-check-card {
+    position: relative;
+}
+
+.health-check-card .card-header {
+    padding-right: 80px;
+}
+
+/* ==========================================================================
+   FPP GAUGE COMPONENT: Circular progress indicators
+   ========================================================================== */
+.fpp-gauge .card-header h5 {
+    font-size: 1em;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.fpp-gauge__container {
+    display: flex;
+    justify-content: center;
+    padding: 15px 0;
+}
+
+.fpp-gauge__circle {
+    position: relative;
+    width: 120px;
+    height: 120px;
+}
+
+.fpp-gauge__circle svg {
+    width: 100%;
+    height: 100%;
+    transform: rotate(-90deg);
+}
+
+.fpp-gauge__bg {
+    fill: none;
+    stroke: var(--fpp-bg-disabled);
+    stroke-width: 8;
+}
+
+.fpp-gauge__fill {
+    fill: none;
+    stroke: var(--fpp-success);
+    stroke-width: 8;
+    stroke-linecap: round;
+    transition: stroke-dasharray 0.5s ease, stroke 0.3s ease;
+}
+
+.fpp-gauge__fill--success {
+    stroke: var(--fpp-success);
+}
+
+.fpp-gauge__fill--warning {
+    stroke: var(--fpp-warning);
+}
+
+.fpp-gauge__fill--danger {
+    stroke: var(--fpp-danger);
+}
+
+.fpp-gauge__value {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 1.75em;
+    font-weight: bold;
+    color: var(--fpp-text-primary);
+}
+
+.fpp-gauge__label {
+    text-align: center;
+    font-size: 0.9em;
+    color: var(--fpp-text-secondary);
+    margin-top: 5px;
+}
+
+/* ==========================================================================
+   RESPONSIVE ADJUSTMENTS
+   ========================================================================== */
+@media (max-width: 768px) {
+    .fpp-gauge__circle {
+        width: 100px;
+        height: 100px;
+    }
+
+    .fpp-gauge__value {
+        font-size: 1.5em;
+    }
+
+    .upgrade-card {
+        padding: 15px;
+    }
+}
