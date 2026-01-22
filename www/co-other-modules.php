@@ -351,6 +351,171 @@
 
 
     /////////////////////////////////////////////////////////////////////////////
+    // RP2354B Pixel Output via SPI
+
+    class RP2354BDevice extends OtherBaseDevice {
+
+        constructor() {
+            super("RP2354B", "RP2354B Pixel Driver", 73728, false, false, SPIDevices, {
+                speed: 40000,  // 40 MHz default (was 20 MHz)
+                compression: 0,
+                chipCount: 1,
+                chipSelects: [],
+                usbDevice: "/dev/ttyACM0",
+                autoUpdate: 0,
+                outputs: []
+            });
+        }
+
+        PopulateHTMLRow(config) {
+            var result = super.PopulateHTMLRow(config);
+
+            result += " Speed (MHz): <input type='number' name='speed' min='1' max='62' class='speed' value='" + (config.speed / 1000) + "' step='1' title='SPI speed: 1-62.5 MHz. Pi Zero 2 W supports up to 62.5 MHz. Start with 40 MHz.'>&nbsp;";
+            result += " Compression: <input type='checkbox' class='compression' title='Enable data compression (future feature)'";
+            if (config.compression)
+                result += " checked='checked'";
+            result += ">&nbsp;";
+            result += "<br>";
+            result += "Chip Count: <input type='number' name='chipCount' min='1' max='4' class='chipCount' value='" + (config.chipCount || 1) + "' title='Number of RP2354B chips (1-4). Use 2 for 48 ports, 4 for 96 ports.'>&nbsp;";
+            result += "<span class='chipSelectContainer' data-chipselects='" + JSON.stringify(config.chipSelects || []) + "'></span>";
+            result += "<br>";
+            result += "USB Device: <input type='text' name='usbDevice' class='usbDevice' value='" + config.usbDevice + "' size='15' title='USB serial device for firmware updates (e.g., /dev/ttyACM0)'>&nbsp;";
+            result += " Auto-Update: <input type='checkbox' class='autoUpdate' title='Automatically update RP2354B firmware on startup'";
+            if (config.autoUpdate)
+                result += " checked='checked'";
+            result += ">";
+            result += "<br><a href='#' class='configureRP2354BPorts' title='Configure up to 24 parallel pixel output ports per chip'>Configure Ports...</a>";
+            result += " <span class='portCount' style='color: #666;'></span>";
+
+            return result;
+        }
+
+        GetOutputConfig(result, cell) {
+            result = super.GetOutputConfig(result, cell);
+
+            if (result == "")
+                return "";
+
+            var speed = parseInt(cell.find("input.speed").val()) * 1000;
+            result.speed = speed;
+
+            var compression = cell.find("input.compression").is(":checked") ? 1 : 0;
+            result.compression = compression;
+
+            var chipCount = parseInt(cell.find("input.chipCount").val()) || 1;
+            result.chipCount = chipCount;
+
+            // Collect chip select GPIO pins
+            if (chipCount > 1) {
+                var chipSelects = [];
+                for (var i = 0; i < chipCount; i++) {
+                    var pin = parseInt(cell.find("input.cs" + i).val()) || 0;
+                    chipSelects.push(pin);
+                }
+                result.chipSelects = chipSelects;
+            }
+
+            var usbDevice = cell.find("input.usbDevice").val();
+            result.usbDevice = usbDevice;
+
+            var autoUpdate = cell.find("input.autoUpdate").is(":checked") ? 1 : 0;
+            result.autoUpdate = autoUpdate;
+
+            // Port configuration (stored in outputs array)
+            if (!result.outputs) {
+                result.outputs = [];
+            }
+
+            return result;
+        }
+
+        RowAdded(row) {
+            super.RowAdded(row);
+
+            // Function to update chip select inputs based on chip count
+            var updateChipSelects = function () {
+                var chipCount = parseInt(row.find('input.chipCount').val()) || 1;
+                var container = row.find('.chipSelectContainer');
+
+                if (chipCount == 1) {
+                    container.html('');
+                } else {
+                    var html = 'CS GPIOs: ';
+
+                    // Get existing values from data attribute or current inputs
+                    var existingSelects = [];
+                    try {
+                        var dataStr = container.attr('data-chipselects');
+                        if (dataStr) {
+                            existingSelects = JSON.parse(dataStr);
+                        }
+                    } catch (e) {
+                        // If parsing fails, try to get from existing inputs
+                        for (var j = 0; j < chipCount; j++) {
+                            var input = container.find('input.cs' + j);
+                            if (input.length > 0) {
+                                existingSelects.push(parseInt(input.val()) || 0);
+                            }
+                        }
+                    }
+
+                    // Default GPIO pins for Bus 0: 8, 7, 25, 24
+                    var defaultPins = [8, 7, 25, 24];
+
+                    for (var i = 0; i < chipCount; i++) {
+                        var value = (existingSelects && existingSelects[i]) ? existingSelects[i] : defaultPins[i];
+                        html += '<input type="number" name="cs' + i + '" class="cs' + i + '" ' +
+                            'value="' + value + '" min="0" max="27" size="3" ' +
+                            'title="Chip ' + i + ' select GPIO pin" style="width:50px;">';
+                        if (i < chipCount - 1) html += ', ';
+                    }
+                    html += ' <span style="color:#666;font-size:90%;">(Chip 0-' + (chipCount - 1) + ')</span>';
+                    container.html(html);
+                }
+
+                updatePortCount();
+            };
+
+            // Update port count display
+            var updatePortCount = function () {
+                var outputs = row.data('outputs') || [];
+                var count = outputs.length;
+                var chipCount = parseInt(row.find('input.chipCount').val()) || 1;
+                var maxPorts = chipCount * 24;
+                row.find('.portCount').text(count > 0 ?
+                    '(' + count + ' of ' + maxPorts + ' port' + (count != 1 ? 's' : '') + ' configured)' :
+                    '(0 of ' + maxPorts + ' ports)');
+            };
+
+            // Update chip selects when chip count changes
+            row.find('input.chipCount').on('change input', updateChipSelects);
+
+            // Add click handler for port configuration
+            row.find('.configureRP2354BPorts').on('click', function (e) {
+                e.preventDefault();
+                var chipCount = parseInt(row.find('input.chipCount').val()) || 1;
+                var maxPorts = chipCount * 24;
+                alert('Advanced port configuration:\n\n' +
+                    'For now, configure via co-pixelStrings.json using type="RP2354B"\n\n' +
+                    'The RP2354B driver integrates with FPP pixel strings and supports:\n' +
+                    '- Up to ' + maxPorts + ' parallel outputs (' + chipCount + ' chip' + (chipCount > 1 ? 's' : '') + ' × 24 ports)\n' +
+                    '- WS2811/WS2812/WS2813/WS2815/SK6812/APA102\n' +
+                    '- Per-port color order, brightness, GPIO assignment\n' +
+                    '- Virtual string grouping, zigzag, etc.\n\n' +
+                    (chipCount > 1 ? 'Port Mapping:\n' +
+                        '  Chip 0: Ports 0-23\n' +
+                        (chipCount > 1 ? '  Chip 1: Ports 24-47\n' : '') +
+                        (chipCount > 2 ? '  Chip 2: Ports 48-71\n' : '') +
+                        (chipCount > 3 ? '  Chip 3: Ports 72-95\n\n' : '\n') : '') +
+                    'See documentation for details.');
+            });
+
+            // Initialize chip select inputs
+            updateChipSelects();
+        }
+    }
+
+    /////////////////////////////////////////////////////////////////////////////
     // WS2801 Output via SPI
 
     class SPIws2801Device extends OtherBaseDevice {
@@ -1207,6 +1372,7 @@
     }
     if ($hasSPI) {
         ?>
+        output_modules.push(new RP2354BDevice());
         output_modules.push(new GenericSPIDevice());
         <?
     }
