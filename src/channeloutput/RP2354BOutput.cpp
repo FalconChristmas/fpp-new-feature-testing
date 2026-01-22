@@ -21,6 +21,7 @@
 #include <unistd.h>
 
 #include "../log.h"
+#include "../Timers.h"
 #include "RP2354BOutput.h"
 
 // CRC32 lookup table for efficient calculation
@@ -111,7 +112,8 @@ RP2354BOutput::RP2354BOutput(unsigned int startChannel, unsigned int channelCoun
       m_testType(0),
       m_testPercent(0.0f),
       m_configSent(false),
-      m_compressionEnabled(false) {
+      m_compressionEnabled(false),
+      m_adcEnabled(false) {  // ADC disabled by default
     
     LogDebug(VB_CHANNELOUT, "RP2354BOutput::RP2354BOutput(%u, %u)\n",
              startChannel, channelCount);
@@ -119,6 +121,10 @@ RP2354BOutput::RP2354BOutput(unsigned int startChannel, unsigned int channelCoun
     // Initialize port mask and chip select pins
     memset(m_activePortMask, 0, sizeof(m_activePortMask));
     memset(m_chipSelectPins, -1, sizeof(m_chipSelectPins));
+    
+    // Initialize ADC monitoring status
+    memset(m_portStatus, 0, sizeof(m_portStatus));
+    memset(m_lastADCWarning, 0, sizeof(m_lastADCWarning));
 }
 
 RP2354BOutput::~RP2354BOutput() {
@@ -188,6 +194,13 @@ int RP2354BOutput::Init(Json::Value config) {
     // Parse compression setting
     if (config.isMember("compression")) {
         m_compressionEnabled = config["compression"].asBool();
+    }
+    
+    // Parse ADC monitoring setting (disabled by default)
+    if (config.isMember("adcMonitoring")) {
+        m_adcEnabled = config["adcMonitoring"].asBool();
+        LogDebug(VB_CHANNELOUT, "ADC monitoring %s\n", 
+                 m_adcEnabled ? "enabled" : "disabled");
     }
 
     // Parse multi-chip configuration
@@ -525,6 +538,14 @@ bool RP2354BOutput::SendConfigurationToChip(int chipIndex) {
     // Build header
     PacketHeader* header = (PacketHeader*)packet;
     BuildPacketHeader(*header, RP2354B_CMD_CONFIG, configPayloadSize, chipPortMask);
+    
+    // Set ADC enable flag if enabled
+    if (m_adcEnabled) {
+        header->flags |= RP2354B_FLAG_ADC_ENABLE;
+    }
+    
+    // Recalculate header CRC after setting flags
+    header->headerCRC = CalculateHeaderCRC(*header);
 
     // Build payload
     ConfigPacket* configs = (ConfigPacket*)(packet + sizeof(PacketHeader));
@@ -642,10 +663,24 @@ bool RP2354BOutput::SendFrameDataToChip(int chipIndex, unsigned char* channelDat
     }
     
     size_t packetSize = sizeof(PacketHeader) + dataSize + sizeof(uint32_t);
-    int result = m_spi->xfer(m_frameBuffer, nullptr, packetSize);
     
-    if (m_chipCount > 1) {
-        SetChipSelect(chipIndex, false);
+    // Only use bidirectional SPI if ADC monitoring is enabled
+    int result;
+    if (m_adcEnabled) {
+        // Allocate MISO buffer for ADC response
+        FrameResponse response;
+        memset(&response, 0, sizeof(response));
+        
+        // Bidirectional SPI transfer - send frame, receive ADC data
+        result = m_spi->xfer2(m_frameBuffer, (uint8_t*)&response, packetSize);
+        
+        // Process ADC response if transfer successful
+        if (result == (int)packetSize) {
+            ProcessFrameResponse(response, chipIndex);
+        }
+    } else {
+        // Simple one-way transfer (no MISO data)
+        result = m_spi->xfer(m_frameBuffer, nullptr, packetSize);
     }
 
     if (result < 0) {
@@ -900,5 +935,123 @@ void RP2354BOutput::CloseGPIO() {
     if (m_gpioFd >= 0) {
         close(m_gpioFd);
         m_gpioFd = -1;
+    }
+}
+
+/**
+ * Process ADC monitoring response from RP2354B
+ */
+void RP2354BOutput::ProcessFrameResponse(const FrameResponse& response, int chipIndex) {
+    // Validate CRC32
+    uint32_t calculatedCRC = CalculateCRC32((const uint8_t*)&response, 
+                                           sizeof(response) - sizeof(uint32_t));
+    if (calculatedCRC != response.crc32) {
+        LogDebug(VB_CHANNELOUT, "RP2354B chip %d: Response CRC mismatch\n", chipIndex);
+        return;
+    }
+    
+    // Process each port's ADC data
+    for (int port = 0; port < 8; port++) {
+        PortStatus& status = m_portStatus[chipIndex][port];
+        
+        // Update raw data
+        status.adcValue = response.adcValues[port];
+        status.statusFlags = response.portStatus[port];
+        status.timestamp = response.timestamp;
+        
+        // Convert to physical units
+        status.millivolts = ADCToMillivolts(status.adcValue);
+        status.milliamps = ADCToMilliamps(status.adcValue);
+        
+        // Estimate pixel count (assuming 60mA per pixel at full white)
+        if (status.milliamps > 10) {
+            status.pixelCount = status.milliamps / 60;
+        } else {
+            status.pixelCount = 0;
+        }
+        
+        // Log warnings for error conditions (rate limited to once per second)
+        uint32_t now = GetTimeMS();
+        if (status.statusFlags != RP2354B_PORT_STATUS_OK && 
+            (now - m_lastADCWarning[chipIndex][port]) > 1000) {
+            
+            int globalPort = chipIndex * RP2354B_MAX_PORTS + port;
+            
+            if (status.statusFlags & RP2354B_PORT_STATUS_OVERCURRENT) {
+                LogWarn(VB_CHANNELOUT, "RP2354B port %d: Overcurrent detected (%d mA)\n", 
+                        globalPort, status.milliamps);
+            }
+            if (status.statusFlags & RP2354B_PORT_STATUS_OVERVOLTAGE) {
+                LogWarn(VB_CHANNELOUT, "RP2354B port %d: Overvoltage detected (%d mV)\n", 
+                        globalPort, status.millivolts);
+            }
+            if (status.statusFlags & RP2354B_PORT_STATUS_UNDERVOLTAGE) {
+                LogWarn(VB_CHANNELOUT, "RP2354B port %d: Undervoltage detected (%d mV)\n", 
+                        globalPort, status.millivolts);
+            }
+            if (status.statusFlags & RP2354B_PORT_STATUS_SHORT) {
+                LogWarn(VB_CHANNELOUT, "RP2354B port %d: Short circuit detected\n", globalPort);
+            }
+            if (status.statusFlags & RP2354B_PORT_STATUS_OPEN) {
+                LogDebug(VB_CHANNELOUT, "RP2354B port %d: Open circuit (no load)\n", globalPort);
+            }
+            
+            m_lastADCWarning[chipIndex][port] = now;
+        }
+    }
+}
+
+/**
+ * Convert ADC value to millivolts
+ */
+uint16_t RP2354BOutput::ADCToMillivolts(uint16_t adcValue) {
+    // RP2354B ADC: 12-bit (0-4095), 3.3V reference
+    // mV = (adc_value * 3300) / 4095
+    return (adcValue * 3300) / 4095;
+}
+
+/**
+ * Convert ADC value to milliamps
+ * This assumes a current sense circuit with known scaling
+ */
+uint16_t RP2354BOutput::ADCToMilliamps(uint16_t adcValue) {
+    // Example: 0.1Ω sense resistor with 6.6× gain
+    // 5A max current → 0.5V across resistor → 3.3V at ADC (full scale)
+    // Therefore: 5000 mA = 4095 ADC counts
+    // mA = (adc_value * 5000) / 4095
+    //
+    // NOTE: This calculation must be calibrated for actual hardware!
+    // Update this formula based on your current sense circuit design.
+    uint16_t mv = ADCToMillivolts(adcValue);
+    
+    // Simple linear approximation (must be calibrated)
+    // Assuming max 5A = 3300mV
+    return (mv * 5000) / 3300;
+}
+
+/**
+ * Check port health and auto-disable problematic ports
+ */
+void RP2354BOutput::CheckPortHealth() {
+    for (int chip = 0; chip < m_chipCount; chip++) {
+        for (int port = 0; port < 8; port++) {
+            const PortStatus& status = m_portStatus[chip][port];
+            int globalPort = chip * RP2354B_MAX_PORTS + port;
+            
+            // Auto-disable port on persistent overcurrent (safety feature)
+            if ((status.statusFlags & RP2354B_PORT_STATUS_OVERCURRENT) &&
+                globalPort < (int)(sizeof(m_portConfigs) / sizeof(m_portConfigs[0]))) {
+                
+                if (m_portConfigs[globalPort].enabled) {
+                    LogErr(VB_CHANNELOUT, 
+                           "RP2354B port %d: Auto-disabling due to overcurrent\n", 
+                           globalPort);
+                    m_portConfigs[globalPort].enabled = false;
+                    
+                    // TODO: Send updated configuration to firmware
+                    // For now, just disable in FPP - firmware will continue
+                }
+            }
+        }
     }
 }

@@ -29,6 +29,7 @@
 // Flags
 #define RP2354B_FLAG_COMPRESSED   0x01
 #define RP2354B_FLAG_DOUBLE_BUF   0x02
+#define RP2354B_FLAG_ADC_ENABLE   0x08  // Enable ADC monitoring (eFuse protection)
 
 // Pixel types
 #define RP2354B_TYPE_WS2811  0x00
@@ -44,6 +45,15 @@
 // Multi-chip support
 #define RP2354B_MAX_CHIPS_PER_BUS 4  // Recommended: 2, Maximum: 4
 #define RP2354B_MAX_TOTAL_PORTS (RP2354B_MAX_PORTS * RP2354B_MAX_CHIPS_PER_BUS)
+
+// Port status flags (from ADC monitoring)
+#define RP2354B_PORT_STATUS_OK              0x00
+#define RP2354B_PORT_STATUS_OVERCURRENT     0x01
+#define RP2354B_PORT_STATUS_OVERVOLTAGE     0x02
+#define RP2354B_PORT_STATUS_UNDERVOLTAGE    0x04
+#define RP2354B_PORT_STATUS_SHORT           0x08
+#define RP2354B_PORT_STATUS_OPEN            0x10
+#define RP2354B_PORT_STATUS_DISABLED        0x80
 
 /**
  * RP2354B Output - Drives pixels via RP2354B microcontroller over SPI
@@ -112,6 +122,14 @@ private:
         uint16_t reserved;
     } __attribute__((packed));
 
+    // Frame response structure (28 bytes, received via SPI MISO)
+    struct FrameResponse {
+        uint16_t adcValues[8];     // ADC readings (0-4095) for 8 ports
+        uint8_t  portStatus[8];    // Status flags per port
+        uint32_t timestamp;        // Microsecond timestamp from RP2354B
+        uint32_t crc32;            // CRC32 checksum
+    } __attribute__((packed));
+
     // Private methods
     bool SendConfiguration();
     bool SendConfigurationToChip(int chipIndex);
@@ -121,6 +139,12 @@ private:
     uint32_t CalculateCRC32(const uint8_t* data, size_t length);
     void BuildPacketHeader(PacketHeader& header, uint8_t command, 
                           uint16_t payloadLen, const uint8_t portMask[3]);
+    
+    // ADC monitoring and status
+    void ProcessFrameResponse(const FrameResponse& response, int chipIndex);
+    uint16_t ADCToMillivolts(uint16_t adcValue);
+    uint16_t ADCToMilliamps(uint16_t adcValue);
+    void CheckPortHealth();
     
     // GPIO control for chip selects
     bool InitGPIO();
@@ -168,6 +192,18 @@ private:
     uint32_t m_lastFrameTime;
     uint8_t  m_sequenceNumber;
     
+    // ADC monitoring data (per chip, per port)
+    struct PortStatus {
+        uint16_t adcValue;       // Last ADC reading
+        uint8_t  statusFlags;    // Status flags
+        uint32_t timestamp;      // Last update timestamp
+        uint16_t millivolts;     // Calculated voltage
+        uint16_t milliamps;      // Calculated current
+        int      pixelCount;     // Estimated pixel count from current
+    };
+    PortStatus m_portStatus[RP2354B_MAX_CHIPS_PER_BUS][8];  // 4 chips × 8 ports
+    uint32_t m_lastADCWarning[RP2354B_MAX_CHIPS_PER_BUS][8]; // Rate limit warnings
+    
     // Testing support
     int m_testCycle;
     int m_testType;
@@ -176,4 +212,5 @@ private:
     // Configuration state
     bool m_configSent;
     bool m_compressionEnabled;
+    bool m_adcEnabled;           // Enable ADC monitoring for eFuse protection
 };
