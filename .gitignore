@@ -45,6 +45,7 @@ external/rasclock/.tmp_versions/*
 external/rasclock/Module.symvers
 external/rasclock/modules.order
 external/rasclock/rtc-pcf2127a.*
+external/rp2354b-pixel-driver*
 lib/librgbmatrix.so
 node_modules
 pixelnetDMX
