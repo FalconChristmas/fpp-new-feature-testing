@@ -1572,14 +1572,22 @@ static void setupAudio() {
 
     if (cards[cstr].starts_with("vc4hdmi") && !hdmiStatus[cards[cstr]]) {
         // nothing connected to the HDMI port so it's definitely not going to work
-        // flip to the dummy output
-        if (!cards.empty() && !cards["card 0"].starts_with("vc4hdmi")) {
-            printf("FPP - Could not find audio device %d, attempting device 0.\n", card);
+        // flip to a non-HDMI card or the first available card
+        bool foundNonHDMI = false;
+        for (const auto& [key, value] : cards) {
+            if (!value.starts_with("vc4hdmi")) {
+                // Extract card number from "card N" string
+                int cardNum = std::stoi(key.substr(5));
+                printf("FPP - HDMI device %d not connected, switching to device %d (%s).\n", card, cardNum, value.c_str());
+                card = cardNum;
+                foundNonHDMI = true;
+                break;
+            }
+        }
+        if (!foundNonHDMI && !cards.empty()) {
+            // All cards are HDMI, just use the first one
+            printf("FPP - All detected cards are HDMI, using card 0.\n");
             card = 0;
-        } else {
-            card = cards.size();
-            found = true;
-            setRawSetting("AudioOutput", std::to_string(card));
         }
     }
     while (!found && count < 50) {
@@ -1739,7 +1747,8 @@ static void setupAudio() {
         if (usePipeWireBackend) {
             audioEnv << "PIPEWIRE_RUNTIME_DIR=/run/pipewire-fpp\n"
                      << "XDG_RUNTIME_DIR=/run/pipewire-fpp\n"
-                     << "PIPEWIRE_CONFIG_DIR=/etc/pipewire\n";
+                     << "PIPEWIRE_CONFIG_DIR=/etc/pipewire\n"
+                     << "PULSE_RUNTIME_PATH=/run/pipewire-fpp/pulse\n";
         }
         PutFileContents(audioEnvPath, audioEnv.str());
     } else if (FileExists(audioEnvPath)) {
