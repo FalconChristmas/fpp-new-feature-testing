@@ -334,11 +334,6 @@
                 if (data.Utilization && data.Utilization.CPU !== undefined) {
                     updateGauge('cpuGauge', parseFloat(data.Utilization.CPU), { yellow: 60, red: 80, unit: '%' });
                 }
-
-                // Memory Usage
-                if (data.Utilization && data.Utilization.Memory !== undefined) {
-                    updateGauge('memGauge', parseFloat(data.Utilization.Memory), { yellow: 60, red: 80, unit: '%' });
-                }
             });
 
             // Update disk storage - using server-side data
@@ -584,21 +579,79 @@
                         </div>
                     </div>
                     <div class="col-md-4">
+                        <?php
+                        $memInfo = get_server_memory_info();
+                        $memTotal = $memInfo['total'];
+                        $memFree = $memInfo['free'];
+                        $memUsed = $memInfo['used'];
+                        $memBufferCache = $memInfo['buffer_cache'];
+                        $memUsage = $memInfo['usage_percent'];
+                        $memBufferUsage = $memInfo['buffer_percent'];
+                        $memFreeUsage = $memInfo['free_percent'];
+                        $memTotalUsage = $memInfo['total_used_percent'];
+                        $memClass = "fpp-gauge__fill--success";
+                        if ($memUsage > 60) $memClass = "fpp-gauge__fill--warning";
+                        if ($memUsage > 80) $memClass = "fpp-gauge__fill--danger";
+
+                        function formatMemBytes($bytes, $decimals = 1) {
+                            if ($bytes == 0) return '0 B';
+                            $k = 1024;
+                            $sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+                            $i = floor(log($bytes) / log($k));
+                            return round($bytes / pow($k, $i), $decimals) . ' ' . $sizes[$i];
+                        }
+                        ?>
                         <div class="card compact-card fpp-gauge">
                             <div class="card-header">
-                                <h5><i class="fa-solid fa-memory"></i> Memory Usage</h5>
+                                <h5>
+                                    <i class="fa-solid fa-memory"></i> Memory Usage
+                                    <i class="fas fa-question-circle fpp-help-icon" id="memoryHelpIcon"></i>
+                                </h5>
+                            </div>
+                            <div id="memoryHelpContent" style="display: none;">
+                                <div class="memory-help">
+                                    <p><span class="memory-help__color memory-help__color--used"></span><strong>Used Memory</strong><br>
+                                    Memory actively used by applications and the OS.</p>
+                                    <p><span class="memory-help__color memory-help__color--buffer"></span><strong>Buffer/Cache</strong><br>
+                                    Memory used for disk caching. Can be reclaimed if needed.</p>
+                                    <p><span class="memory-help__color memory-help__color--free"></span><strong>Free Memory</strong><br>
+                                    Completely unused memory.</p>
+                                    <hr>
+                                    <p style="margin-bottom:0;"><em>High buffer/cache is normal — it means your system is efficiently using available RAM.</em></p>
+                                </div>
                             </div>
                             <div class="card-body">
                                 <div class="fpp-gauge__container">
                                     <div class="fpp-gauge__circle">
                                         <svg viewBox="0 0 100 100">
                                             <circle class="fpp-gauge__bg" cx="50" cy="50" r="45"></circle>
-                                            <circle class="fpp-gauge__fill fpp-gauge__fill--success" id="memGaugeFill" cx="50" cy="50" r="45" stroke-dasharray="0 282.7"></circle>
+                                            <circle class="fpp-gauge__fill <?php echo $memClass; ?>" id="memGaugeFill" cx="50" cy="50" r="45"
+                                                stroke-dasharray="<?php printf('%.1f', $memUsage * 2.827); ?> 282.7">
+                                                <title>Used: <?php echo formatMemBytes($memUsed); ?> (<?php printf('%.1f', $memUsage); ?>%)</title>
+                                            </circle>
+                                            <circle class="fpp-gauge__fill fpp-gauge__fill--buffer" cx="50" cy="50" r="45"
+                                                stroke-dasharray="<?php printf('%.1f', $memBufferUsage * 2.827); ?> 282.7"
+                                                style="transform: rotate(<?php printf('%.1f', $memUsage * 3.6); ?>deg); transform-origin: 50% 50%;">
+                                                <title>Buffer/Cache: <?php echo formatMemBytes($memBufferCache); ?> (<?php printf('%.1f', $memBufferUsage); ?>%)</title>
+                                            </circle>
+                                            <circle class="fpp-gauge__fill fpp-gauge__fill--free" cx="50" cy="50" r="45"
+                                                stroke-dasharray="<?php printf('%.1f', $memFreeUsage * 2.827); ?> 282.7"
+                                                style="transform: rotate(<?php printf('%.1f', $memTotalUsage * 3.6); ?>deg); transform-origin: 50% 50%;">
+                                                <title>Free: <?php echo formatMemBytes($memFree); ?> (<?php printf('%.1f', $memFreeUsage); ?>%)</title>
+                                            </circle>
                                         </svg>
-                                        <div class="fpp-gauge__value" id="memValue">--%</div>
+                                        <div class="fpp-gauge__value" id="memValue">
+                                            <?php printf('%.0f', $memTotalUsage); ?>%
+                                            <span class="fpp-gauge__total"><?php echo formatMemBytes($memTotal); ?></span>
+                                        </div>
                                     </div>
                                 </div>
-                                <div class="fpp-gauge__label">RAM Utilization</div>
+                                <div class="fpp-gauge__label">
+                                    <?php echo formatMemBytes($memUsed); ?> used
+                                    <span style="opacity: 0.7; margin-left: 4px;">(+<?php echo formatMemBytes($memBufferCache); ?> cache)</span>
+                                    <br>
+                                    <span style="opacity: 0.7;"><?php echo formatMemBytes($memFree); ?> free</span>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -802,6 +855,20 @@
         var popoverList = popoverTriggerList.map(function (popoverTriggerEl) {
             return new bootstrap.Popover(popoverTriggerEl);
         });
+
+        // Memory help popover
+        var memoryHelpIcon = document.getElementById('memoryHelpIcon');
+        var memoryHelpContent = document.getElementById('memoryHelpContent');
+        if (memoryHelpIcon && memoryHelpContent) {
+            new bootstrap.Popover(memoryHelpIcon, {
+                title: 'Memory Types',
+                content: memoryHelpContent.innerHTML,
+                html: true,
+                trigger: 'hover focus',
+                placement: 'bottom',
+                sanitize: false
+            });
+        }
     </script>
 </body>
 
