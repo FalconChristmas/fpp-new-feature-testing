@@ -1,3 +1,13 @@
+<?php
+if (isset($_GET['cpu'])) {
+    $skipJSsettings = true;
+    require_once 'config.php';
+    require_once 'common.php';
+    header('Content-Type: application/json');
+    echo json_encode(['cpu' => get_cpu_stats_raw()]);
+    exit;
+}
+?>
 <!DOCTYPE html>
 <html>
 
@@ -269,7 +279,38 @@
             return parseFloat((bytes / Math.pow(k, i)).toFixed(decimals)) + ' ' + sizes[i];
         }
 
+        // CPU: EMA smoothing - reduce jitter
+        var cpuPrev = null;
+        var cpuEma = null;
+        var cpuAlpha = 0.4;
+        // 2 polls (~10 sec) to reach ~64% of a sustained change
+        // 4 polls (~20 sec) to reach ~87%
+        // 5 polls (~25 sec) to reach ~92%
+        function updateCpuGauge() {
+            $.getJSON('system-stats.php?cpu=1', function (data) {
+                var raw;
+                if (data.cpu.mac !== undefined) {
+                    raw = data.cpu.mac;
+                } else {
+                    var cur = data.cpu.map(Number);
+                    var idle, total = 0;
+                    if (cpuPrev) {
+                        idle = cur[3] - cpuPrev[3];
+                        for (var i = 0; i < cur.length; i++) total += cur[i] - cpuPrev[i];
+                    } else {
+                        idle = cur[3];
+                        for (var i = 0; i < cur.length; i++) total += cur[i];
+                    }
+                    raw = (total > 0) ? 100 - (idle * 100 / total) : 0;
+                    cpuPrev = cur;
+                }
+                cpuEma = (cpuEma === null) ? raw : cpuAlpha * raw + (1 - cpuAlpha) * cpuEma;
+                updateGauge('cpuGauge', cpuEma, { yellow: 60, red: 80, unit: '%' });
+            });
+        }
+
         function updateStats() {
+            updateCpuGauge();
             $.get('api/system/status', function (data) {
                 // Temperature
                 if (data.sensors && data.sensors.length > 0) {
@@ -329,12 +370,6 @@
                 $('#cpu-cores').text(cores);
             });
 
-            $.get('api/system/info', function (data) {
-                // CPU Usage
-                if (data.Utilization && data.Utilization.CPU !== undefined) {
-                    updateGauge('cpuGauge', parseFloat(data.Utilization.CPU), { yellow: 60, red: 80, unit: '%' });
-                }
-            });
 
             // Update disk storage - using server-side data
             updateDiskStorage();

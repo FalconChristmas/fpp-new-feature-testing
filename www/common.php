@@ -1866,7 +1866,21 @@ function get_cpu_stats()
 }
 
 /**
+ * Returns raw cumulative CPU counters from /proc/stat,
+ */
+function get_cpu_stats_raw()
+{
+    global $settings;
+    if ($settings["Platform"] == "MacOS") {
+        $output = exec("ps -A -o %cpu | awk '{s+=$1} END {print s}'");
+        return array('mac' => floatval($output));
+    }
+    return get_cpu_stats();
+}
+
+/**
  * Returns average CPU usage
+ * Still used by GetSystemInfoJsonInternal() which feeds api/system/info
  * @return mixed
  */
 function get_server_cpu_usage()
