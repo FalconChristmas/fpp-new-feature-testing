@@ -353,6 +353,7 @@ if (isset($_GET['cpu'])) {
                     $('#load-1min-value').text(load1.toFixed(2));
                     $('#load-1min-bar').css('width', pct1 + '%').attr('aria-valuenow', pct1);
                     updateLoadColor($('#load-1min-bar'), pct1);
+                    updateBusynessStatus(pct1);
 
                     var load5 = parseFloat(loads[1]);
                     var pct5 = Math.min((load5 / cores) * 100, 100);
@@ -475,6 +476,27 @@ if (isset($_GET['cpu'])) {
             } else {
                 element.addClass('bg-success');
             }
+        }
+
+        function updateBusynessStatus(pct) {
+            var statusEl = document.getElementById('busyness-status');
+            if (!statusEl) return;
+            var text, icon, cls;
+            if (pct > 90) {
+                text = 'Overloaded';
+                icon = 'fa-exclamation-triangle';
+                cls = 'fpp-status--fail';
+            } else if (pct > 70) {
+                text = 'Busy';
+                icon = 'fa-exclamation-circle';
+                cls = 'fpp-status--warn';
+            } else {
+                text = 'Running smoothly';
+                icon = 'fa-check-circle';
+                cls = 'fpp-status--pass';
+            }
+            statusEl.innerHTML = '<i class="fas ' + icon + ' ' + cls + '"></i> ' + text;
+            statusEl.className = 'busyness-status ' + cls;
         }
 
         function updatePlayerStats() {
@@ -639,8 +661,10 @@ if (isset($_GET['cpu'])) {
                         <div class="card compact-card fpp-gauge">
                             <div class="card-header">
                                 <h5>
-                                    <i class="fa-solid fa-memory"></i> Memory Usage
-                                    <i class="fas fa-question-circle fpp-help-icon" id="memoryHelpIcon"></i>
+                                    <span><i class="fa-solid fa-memory"></i> Memory Usage</span>
+                                    <i class="fas fa-question-circle fpp-help-popover"
+                                        data-help-content="memoryHelpContent" data-help-title="Memory Types"
+                                        style="font-size: 0.8em; cursor: help; margin-left: auto;"></i>
                                 </h5>
                             </div>
                             <div id="memoryHelpContent" style="display: none;">
@@ -789,15 +813,41 @@ if (isset($_GET['cpu'])) {
 
                     <!-- Load Average -->
                     <div class="col-md-4">
+                        <?php
+                        $_la = sys_getloadavg();
+                        $_nc = 4;
+                        if (file_exists('/proc/cpuinfo')) {
+                            preg_match_all('/^processor/m', file_get_contents('/proc/cpuinfo'), $_m);
+                            $_nc = count($_m[0]) ?: 4;
+                        }
+                        $_lp = min(($_la[0] / $_nc) * 100, 100);
+                        $_traffic = $_lp > 90 ? 'heavy' : ($_lp > 70 ? 'moderate' : 'light');
+                        ?>
                         <div class="card compact-card">
                             <div class="card-header">
-                                <h3>
-                                    <i class="fas fa-tachometer-alt"></i> Load Average
-                                    <i class="fas fa-question-circle" data-bs-toggle="popover" data-bs-trigger="hover"
-                                        data-bs-placement="top"
-                                        data-bs-content="Load average represents the average system load over 1, 5, and 15 minute periods. Values are normalized to CPU core count. Green = healthy, Yellow = moderate load, Red = high load."
-                                        style="font-size: 0.8em; cursor: help;"></i>
+                                <h3 style="display: flex; align-items: center;">
+                                    <span><i class="fas fa-tachometer-alt"></i> System Busyness</span>
+                                    <i class="fas fa-question-circle fpp-help-popover"
+                                        data-help-content="busynessHelpContent" data-help-title="System Busyness"
+                                        style="font-size: 0.8em; cursor: help; margin-left: auto;"></i>
                                 </h3>
+                            </div>
+                            <?php
+                            $coresNum = (int)$cores;
+                            $threshGreen = number_format($coresNum * 0.70, 2);
+                            $threshYellow = number_format($coresNum * 0.90, 2);
+                            ?>
+                            <div id="busynessHelpContent" style="display: none;">
+                                <div class="busyness-help">
+                                    <p><span class="busyness-help__color busyness-help__color--green"></span><strong>Running smoothly</strong> (below <?= $threshGreen ?>)<br>
+                                    Traffic is light — your system has plenty of capacity.</p>
+                                    <p><span class="busyness-help__color busyness-help__color--yellow"></span><strong>Busy</strong> (<?= $threshGreen ?> – <?= $threshYellow ?>)<br>
+                                    Traffic is moderate — things are getting congested.</p>
+                                    <p><span class="busyness-help__color busyness-help__color--red"></span><strong>Overloaded</strong> (above <?= $threshYellow ?>)<br>
+                                    Traffic is heavy — your system is in gridlock.</p>
+                                    <hr>
+                                    <p style="margin-bottom:0;"><em>Your system is like a highway with <?= $coresNum ?> lanes (CPU cores). The numbers show average load over 1, 5, and 15 minutes. Right now, traffic is <?= $_traffic ?>.</em></p>
+                                </div>
                             </div>
                             <div class="card-body">
                                 <div class="load-bar-container">
@@ -833,6 +883,7 @@ if (isset($_GET['cpu'])) {
                                         </div>
                                     </div>
                                 </div>
+                                <div id="busyness-status" class="busyness-status"></div>
                                 <div class="load-avg-info">
                                     <i class="fas fa-microchip"></i> <span id="cpu-cores">--</span> CPU cores available
                                 </div>
@@ -891,19 +942,19 @@ if (isset($_GET['cpu'])) {
             return new bootstrap.Popover(popoverTriggerEl);
         });
 
-        // Memory help popover
-        var memoryHelpIcon = document.getElementById('memoryHelpIcon');
-        var memoryHelpContent = document.getElementById('memoryHelpContent');
-        if (memoryHelpIcon && memoryHelpContent) {
-            new bootstrap.Popover(memoryHelpIcon, {
-                title: 'Memory Types',
-                content: memoryHelpContent.innerHTML,
-                html: true,
-                trigger: 'hover focus',
-                placement: 'bottom',
-                sanitize: false
-            });
-        }
+        document.querySelectorAll('.fpp-help-popover').forEach(function (icon) {
+            var contentEl = document.getElementById(icon.dataset.helpContent);
+            if (contentEl) {
+                new bootstrap.Popover(icon, {
+                    title: icon.dataset.helpTitle || '',
+                    content: contentEl.innerHTML,
+                    html: true,
+                    trigger: 'hover focus',
+                    placement: 'bottom',
+                    sanitize: false
+                });
+            }
+        });
     </script>
 </body>
 

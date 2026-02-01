@@ -72,6 +72,8 @@
 
     /* Common Spacing Values */
     --fpp-sp-xs: 5px;
+    --fpp-sp-icon: 6px;
+    /* Icon-to-text gap */
     --fpp-sp-sm: 10px;
     --fpp-sp-md: 15px;
     --fpp-sp-lg: 20px;
@@ -253,7 +255,7 @@
 .fpp-icon-text i,
 .uptime-started i,
 .load-avg-info i {
-    margin-right: 6px;
+    margin-right: var(--fpp-sp-icon);
     opacity: 0.7;
 }
 
@@ -266,15 +268,15 @@
    COMPACT CARDS: Tighter spacing, used on system pages
    ========================================================================== */
 .compact-card {
-    margin-bottom: 15px;
+    margin-bottom: var(--fpp-sp-md);
 }
 
 .compact-card .card-body {
-    padding: 15px;
+    padding: var(--fpp-sp-md);
 }
 
 .compact-card .card-header h3 {
-    font-size: 1.1em;
+    font-size: var(--fpp-fs-lg);
     margin: 0;
 }
 
@@ -282,7 +284,7 @@
    DISK UTILIZATION COMPONENTS
    ========================================================================== */
 .disk-row {
-    margin-bottom: 15px;
+    margin-bottom: var(--fpp-sp-md);
 }
 
 .disk-row:last-child {
@@ -290,20 +292,20 @@
 }
 
 .disk-label {
-    font-size: 0.9em;
-    margin-bottom: 5px;
+    font-size: var(--fpp-fs-base);
+    margin-bottom: var(--fpp-sp-xs);
     display: flex;
     justify-content: space-between;
 }
 
 .disk-device {
     color: var(--fpp-text-secondary);
-    font-weight: 600;
+    font-weight: var(--fpp-fw-semibold);
 }
 
 .disk-info {
     color: var(--fpp-text-muted);
-    font-size: 0.85em;
+    font-size: var(--fpp-fs-sm);
 }
 
 /* Pill shaped */
@@ -316,7 +318,7 @@
 .disk-row .progress-bar {
     border-radius: 12px;
     font-size: 0.8em;
-    font-weight: 600;
+    font-weight: var(--fpp-fw-semibold);
     line-height: 24px;
 }
 
@@ -325,15 +327,15 @@
    ========================================================================== */
 .uptime-display {
     text-align: center;
-    padding: 20px;
+    padding: var(--fpp-card-padding);
 }
 
 .uptime-counters {
     display: flex;
     justify-content: center;
     align-items: flex-start;
-    gap: 4px;
-    margin-bottom: 15px;
+    gap: var(--fpp-spacing-1);
+    margin-bottom: var(--fpp-sp-md);
 }
 
 .uptime-segment {
@@ -342,8 +344,8 @@
 }
 
 .uptime-number {
-    font-size: 2em;
-    font-weight: bold;
+    font-size: var(--fpp-fs-3xl);
+    font-weight: var(--fpp-fw-bold);
     color: var(--fpp-primary);
     line-height: 1;
 }
@@ -353,13 +355,13 @@
     color: var(--fpp-text-muted);
     text-transform: uppercase;
     letter-spacing: 0.02em;
-    margin-top: 4px;
+    margin-top: var(--fpp-spacing-1);
     white-space: nowrap;
 }
 
 .uptime-separator {
-    font-size: 2em;
-    font-weight: bold;
+    font-size: var(--fpp-fs-3xl);
+    font-weight: var(--fpp-fw-bold);
     color: var(--fpp-text-muted);
     line-height: 1;
     padding: 0 2px;
@@ -367,7 +369,7 @@
 
 .uptime-started {
     color: var(--fpp-text-muted);
-    font-size: 0.85em;
+    font-size: var(--fpp-fs-sm);
     overflow: hidden;
     text-overflow: ellipsis;
 }
@@ -375,7 +377,7 @@
 /* Scale down uptime counters when in narrow column (col-md-4 on medium screens) */
 @media (min-width: 768px) and (max-width: 1199px) {
     .uptime-display {
-        padding: 15px 10px;
+        padding: var(--fpp-sp-md) var(--fpp-sp-sm);
     }
 
     .uptime-counters {
@@ -392,7 +394,7 @@
     }
 
     .uptime-started {
-        font-size: 0.75em;
+        font-size: var(--fpp-fs-xs);
     }
 }
 
@@ -408,8 +410,8 @@
 }
 
 .load-label {
-    font-size: 0.85em;
-    margin-bottom: 4px;
+    font-size: var(--fpp-fs-sm);
+    margin-bottom: var(--fpp-spacing-1);
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -420,7 +422,7 @@
 }
 
 .load-label span:last-child {
-    font-weight: 600;
+    font-weight: var(--fpp-fw-semibold);
     color: var(--fpp-text-primary);
     font-family: var(--fpp-font-mono);
 }
@@ -428,19 +430,33 @@
 /* Pill shaped */
 .load-bar-container .progress {
     height: 10px;
-    border-radius: 5px;
+    border-radius: var(--fpp-radius-md);
     background-color: var(--fpp-progress-bg);
 }
 
 .load-bar-container .progress-bar {
-    border-radius: 5px;
+    border-radius: var(--fpp-radius-md);
+}
+
+/* Busyness status indicator */
+.busyness-status {
+    text-align: center;
+    font-weight: var(--fpp-fw-semibold);
+    font-size: var(--fpp-fs-base);
+    padding: var(--fpp-sp-sm) 0;
+    margin-top: var(--fpp-sp-sm);
+    border-top: 1px solid var(--fpp-border-light);
+}
+
+.busyness-status i {
+    margin-right: var(--fpp-spacing-2);
 }
 
 /* Load average info footer */
 .load-avg-info {
     text-align: center;
     margin-top: 12px;
-    padding-top: 10px;
+    padding-top: var(--fpp-sp-sm);
     border-top: 1px solid var(--fpp-border-light);
     font-size: 0.8em;
     color: var(--fpp-text-muted);
@@ -474,11 +490,11 @@
 
 .stat-name {
     color: var(--fpp-text-secondary);
-    font-size: 1.1em;
+    font-size: var(--fpp-fs-lg);
 }
 
 .stat-count {
-    font-weight: 600;
+    font-weight: var(--fpp-fw-semibold);
     color: var(--fpp-primary);
     font-family: var(--fpp-font-mono);
 }
@@ -492,7 +508,7 @@
 .fpp-alert {
     position: relative;
     padding: 1.35rem 1.8rem;
-    margin-bottom: 1rem;
+    margin-bottom: var(--fpp-spacing-3);
     border: 1px solid transparent;
     border-radius: var(--fpp-radius-lg);
     font-size: 0.95rem;
@@ -510,7 +526,7 @@
 .fpp-alert--danger a,
 .fpp-alert--danger .alert-link {
     color: #fff;
-    font-weight: 600;
+    font-weight: var(--fpp-fw-semibold);
     text-decoration: underline;
 }
 
@@ -565,8 +581,8 @@
     background-color: var(--fpp-bg-disabled);
     border: 2px solid var(--fpp-success);
     border-radius: var(--fpp-radius-lg);
-    padding: 15px;
-    margin: 15px 0;
+    padding: var(--fpp-sp-md);
+    margin: var(--fpp-sp-md) 0;
     cursor: pointer;
     transition: all var(--fpp-transition-normal);
 }
@@ -588,9 +604,9 @@
 .version-indicator .version-progress {
     display: flex;
     align-items: center;
-    gap: 15px;
+    gap: var(--fpp-sp-md);
     font-family: var(--fpp-font-mono);
-    font-weight: bold;
+    font-weight: var(--fpp-fw-bold);
 }
 
 .version-indicator .version-arrow {
@@ -600,10 +616,10 @@
 .version-indicator .commits-behind {
     display: flex;
     align-items: center;
-    gap: 5px;
-    font-size: 0.9em;
+    gap: var(--fpp-sp-xs);
+    font-size: var(--fpp-fs-base);
     color: var(--fpp-gray);
-    margin-top: 5px;
+    margin-top: var(--fpp-sp-xs);
 }
 
 /* ==========================================================================
@@ -612,35 +628,35 @@
 .upgrade-card {
     border: 2px solid var(--fpp-border);
     border-radius: var(--fpp-radius-lg);
-    padding: 20px;
-    margin-bottom: 20px;
+    padding: var(--fpp-card-padding);
+    margin-bottom: var(--fpp-sp-lg);
     background-color: var(--fpp-bg-page);
 }
 
 .upgrade-card h3 {
     color: var(--fpp-text-primary);
-    margin-bottom: 15px;
+    margin-bottom: var(--fpp-sp-md);
 }
 
 .upgrade-button {
     width: 100%;
     padding: 12px;
-    font-size: 1.1em;
-    margin-top: 10px;
+    font-size: var(--fpp-fs-lg);
+    margin-top: var(--fpp-sp-sm);
 }
 
 .version-info {
     background-color: var(--fpp-bg-card);
     border: 1px solid var(--fpp-border);
     border-radius: var(--fpp-radius-md);
-    padding: 15px;
-    margin-bottom: 20px;
+    padding: var(--fpp-sp-md);
+    margin-bottom: var(--fpp-sp-lg);
 }
 
 .version-row {
     display: flex;
     justify-content: space-between;
-    padding: 8px 0;
+    padding: var(--fpp-spacing-2) 0;
     border-bottom: 1px solid var(--fpp-border-light);
 }
 
@@ -649,7 +665,7 @@
 }
 
 .version-label {
-    font-weight: 600;
+    font-weight: var(--fpp-fw-semibold);
     color: var(--fpp-text-secondary);
 }
 
@@ -658,19 +674,19 @@
 }
 
 .update-badge {
-    font-size: 0.75em;
-    margin-left: 5px;
+    font-size: var(--fpp-fs-xs);
+    margin-left: var(--fpp-sp-xs);
 }
 
 /* ==========================================================================
    FAQ ACCORDION STYLING
    ========================================================================== */
 .faq-accordion .accordion-button {
-    font-size: 0.85em;
+    font-size: var(--fpp-fs-sm);
     padding: 0.6rem 0.85rem;
     background-color: var(--fpp-bg-card);
     border: none;
-    font-weight: 600;
+    font-weight: var(--fpp-fw-semibold);
     color: var(--fpp-text-primary);
     position: relative;
     padding-right: 2.5rem;
@@ -694,7 +710,7 @@
     position: absolute;
     right: 0.85rem;
     transition: transform var(--fpp-transition-fast);
-    font-size: 0.75em;
+    font-size: var(--fpp-fs-xs);
 }
 
 .faq-accordion .accordion-button:not(.collapsed)::after {
@@ -702,7 +718,7 @@
 }
 
 .fpp-accordion .accordion-body {
-    font-size: 0.85em;
+    font-size: var(--fpp-fs-sm);
     padding: 0.85rem 1rem;
     line-height: 1.5;
     background-color: var(--fpp-bg-page);
@@ -724,12 +740,12 @@
    UPDATE BANNERS
    ========================================================================== */
 .update-banner {
-    padding: 20px;
+    padding: var(--fpp-card-padding);
     border-radius: var(--fpp-radius-lg);
-    margin-bottom: 20px;
+    margin-bottom: var(--fpp-sp-lg);
     display: flex;
     align-items: center;
-    gap: 15px;
+    gap: var(--fpp-sp-md);
 }
 
 .update-banner.fpp-update {
@@ -745,11 +761,11 @@
 }
 
 .update-banner i {
-    font-size: 2em;
+    font-size: var(--fpp-fs-3xl);
 }
 
 .update-banner .banner-content h4 {
-    margin: 0 0 5px 0;
+    margin: 0 0 var(--fpp-sp-xs) 0;
 }
 
 .update-banner .banner-content p {
@@ -762,9 +778,9 @@
 .version-header {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
-    padding: 25px;
+    padding: var(--fpp-sp-xl);
     border-radius: var(--fpp-radius-lg);
-    margin-bottom: 20px;
+    margin-bottom: var(--fpp-sp-lg);
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -772,20 +788,20 @@
 
 .version-header h2 {
     margin: 0;
-    font-size: 1.8em;
+    font-size: var(--fpp-fs-2xl);
 }
 
 .version-header .git-hash {
     font-family: var(--fpp-font-mono);
     opacity: 0.9;
-    font-size: 0.9em;
+    font-size: var(--fpp-fs-base);
 }
 
 /* ==========================================================================
    COMPARISON TABLE
    ========================================================================== */
 .comparison-table {
-    margin: 30px 0;
+    margin: var(--fpp-sp-2xl) 0;
 }
 
 .comparison-table table {
@@ -795,7 +811,7 @@
 
 .comparison-table th {
     background-color: var(--fpp-bg-page);
-    padding: 15px;
+    padding: var(--fpp-sp-md);
     text-align: left;
     border-bottom: 2px solid var(--fpp-border-medium);
 }
@@ -810,7 +826,7 @@
 }
 
 .comparison-table .feature-name {
-    font-weight: bold;
+    font-weight: var(--fpp-fw-bold);
 }
 
 /* ==========================================================================
@@ -820,11 +836,11 @@
     background-color: var(--fpp-bg-page);
     border: 1px solid var(--fpp-border);
     border-radius: var(--fpp-radius-md);
-    padding: 20px;
+    padding: var(--fpp-card-padding);
 }
 
 .resources-card h3 {
-    margin-bottom: 15px;
+    margin-bottom: var(--fpp-sp-md);
 }
 
 .resources-card ul {
@@ -833,7 +849,7 @@
 }
 
 .resources-card ul li {
-    padding: 5px 0;
+    padding: var(--fpp-sp-xs) 0;
 }
 
 .resources-card ul li i {
@@ -848,14 +864,14 @@
     background-color: var(--fpp-bg-page);
     border: 2px solid var(--fpp-gray);
     border-radius: var(--fpp-radius-lg);
-    padding: 20px;
-    margin-top: 20px;
+    padding: var(--fpp-card-padding);
+    margin-top: var(--fpp-sp-lg);
 }
 
 .advanced-card h4 {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--fpp-sp-sm);
 }
 
 .badge.recommended {
@@ -872,8 +888,8 @@
 .fpp-health-summary {
     display: flex;
     justify-content: space-around;
-    padding: 8px 0;
-    margin-bottom: 10px;
+    padding: var(--fpp-spacing-2) 0;
+    margin-bottom: var(--fpp-sp-sm);
     border-bottom: 1px solid var(--fpp-border);
     min-height: 52px;
     box-sizing: border-box;
@@ -886,7 +902,7 @@
 
 .fpp-health-summary__count {
     font-size: 1.25rem;
-    font-weight: bold;
+    font-weight: var(--fpp-fw-bold);
     display: block;
     line-height: 1.2;
     min-width: 2ch;
@@ -956,7 +972,7 @@
 
 .fpp-health-check__label i {
     width: 16px;
-    margin-right: 10px;
+    margin-right: var(--fpp-sp-sm);
     color: var(--fpp-text-muted);
     text-align: center;
     font-size: 0.75rem;
@@ -969,14 +985,14 @@
     font-size: 0.85rem;
     flex: 1 1 auto;
     justify-content: flex-end;
-    margin-left: 15px;
+    margin-left: var(--fpp-sp-md);
     min-width: 0;
     overflow: hidden;
 }
 
 .fpp-health-check__status-icon {
     font-size: 0.8rem;
-    margin-right: 6px;
+    margin-right: var(--fpp-sp-icon);
     flex-shrink: 0;
     width: 14px;
     text-align: center;
@@ -1011,19 +1027,19 @@
     position: absolute;
     top: 8px;
     right: 12px;
-    padding: 4px 10px;
+    padding: var(--fpp-spacing-1) var(--fpp-sp-sm);
     font-size: 0.8rem;
-    background: var(--fpp-bg, #f8f9fa);
-    border: 1px solid var(--fpp-border, #dee2e6);
-    border-radius: 4px;
+    background: var(--fpp-bg-page);
+    border: 1px solid var(--fpp-border);
+    border-radius: var(--fpp-radius-sm);
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: all var(--fpp-transition-fast);
     z-index: 10;
 }
 
 .fpp-health-rerun-btn:hover {
-    background: #e9ecef;
-    border-color: #ced4da;
+    background: var(--fpp-bg-disabled);
+    border-color: var(--fpp-border-dark);
 }
 
 .fpp-health-rerun-btn:disabled {
@@ -1032,7 +1048,7 @@
 }
 
 .fpp-health-rerun-btn i {
-    margin-right: 4px;
+    margin-right: var(--fpp-spacing-1);
 }
 
 /* Health Check Card (position context for rerun button) */
@@ -1102,17 +1118,17 @@
    FPP GAUGE COMPONENT: Circular progress indicators
    ========================================================================== */
 .fpp-gauge .card-header h5 {
-    font-size: 1em;
+    font-size: var(--fpp-fs-md);
     margin: 0;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--fpp-spacing-2);
 }
 
 .fpp-gauge__container {
     display: flex;
     justify-content: center;
-    padding: 15px 0;
+    padding: var(--fpp-sp-md) 0;
 }
 
 .fpp-gauge__circle {
@@ -1138,7 +1154,7 @@
     stroke: var(--fpp-success);
     stroke-width: 8;
     stroke-linecap: round;
-    transition: stroke-dasharray 0.5s ease, stroke 0.3s ease;
+    transition: stroke-dasharray var(--fpp-transition-slow), stroke var(--fpp-transition-normal);
 }
 
 .fpp-gauge__fill--success {
@@ -1159,16 +1175,16 @@
     left: 50%;
     transform: translate(-50%, -50%);
     font-size: 1.75em;
-    font-weight: bold;
+    font-weight: var(--fpp-fw-bold);
     color: var(--fpp-text-primary);
     text-align: center;
 }
 
 .fpp-gauge__label {
     text-align: center;
-    font-size: 0.9em;
+    font-size: var(--fpp-fs-base);
     color: var(--fpp-text-secondary);
-    margin-top: 5px;
+    margin-top: var(--fpp-sp-xs);
     min-height: 2.8em;
 }
 
@@ -1206,13 +1222,13 @@
 
 /* Memory help popover content */
 .memory-help p {
-    margin-bottom: 10px;
+    margin-bottom: var(--fpp-sp-sm);
     font-size: 13px;
     line-height: 1.4;
 }
 
 .memory-help hr {
-    margin: 10px 0;
+    margin: var(--fpp-sp-sm) 0;
     opacity: 0.2;
 }
 
@@ -1221,7 +1237,7 @@
     width: 12px;
     height: 12px;
     border-radius: 3px;
-    margin-right: 6px;
+    margin-right: var(--fpp-sp-icon);
     vertical-align: middle;
 }
 
@@ -1237,6 +1253,39 @@
     background: var(--fpp-gray);
 }
 
+/* Busyness help popover content */
+.busyness-help p {
+    margin-bottom: var(--fpp-sp-sm);
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.busyness-help hr {
+    margin: var(--fpp-sp-sm) 0;
+    opacity: 0.2;
+}
+
+.busyness-help__color {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    margin-right: var(--fpp-sp-icon);
+    vertical-align: middle;
+}
+
+.busyness-help__color--green {
+    background: var(--fpp-success);
+}
+
+.busyness-help__color--yellow {
+    background: var(--fpp-warning);
+}
+
+.busyness-help__color--red {
+    background: var(--fpp-danger);
+}
+
 /* ==========================================================================
    RESPONSIVE ADJUSTMENTS
    ========================================================================== */
@@ -1247,10 +1296,10 @@
     }
 
     .fpp-gauge__value {
-        font-size: 1.5em;
+        font-size: var(--fpp-fs-xl);
     }
 
     .upgrade-card {
-        padding: 15px;
+        padding: var(--fpp-sp-md);
     }
 }
