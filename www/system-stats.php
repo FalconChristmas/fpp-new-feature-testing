@@ -277,10 +277,10 @@
                     <?php if (isset($settings['temperatureInF']) && $settings['temperatureInF'] == 1) { ?>
                         temp = (temp * 9 / 5) + 32;
                         // Fahrenheit thresholds: 140°F (60°C), 176°F (80°C), max 212°F (100°C)
-                        updateGauge('tempGauge', temp, { yellow: 140, red: 176, max: 212, unit: '°' });
+                        updateGauge('tempGauge', temp, { yellow: 140, red: 176, max: 212, unit: '°F' });
                     <?php } else { ?>
                         // Celsius thresholds: 60°C, 80°C, max 100°C
-                        updateGauge('tempGauge', temp, { yellow: 60, red: 80, max: 100, unit: '°' });
+                        updateGauge('tempGauge', temp, { yellow: 60, red: 80, max: 100, unit: '°C' });
                     <?php } ?>
                 }
 
@@ -670,7 +670,7 @@
                                         <div class="fpp-gauge__value" id="tempValue">--°</div>
                                     </div>
                                 </div>
-                                <div class="fpp-gauge__label" id="tempLabel">CPU Temperature</div>
+                                <div class="fpp-gauge__label" id="tempLabel">CPU Temperature (<?php echo (isset($settings['temperatureInF']) && $settings['temperatureInF'] == 1) ? '°F' : '°C'; ?>)</div>
                             </div>
                         </div>
                     </div>
