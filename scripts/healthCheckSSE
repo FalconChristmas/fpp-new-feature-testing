@@ -60,21 +60,27 @@ HC_Warnings() {
     if ! command -v jq &>/dev/null; then
         status="fail"
         message="jq not installed. Perform FPP Upgrade"
+        emit_event "warnings" "FPPD Warnings" "fa-exclamation-triangle" "$status" "$message"
     elif [ ! -r "$WARNING_FILE" ]; then
         status="pass"
         message="No warnings"
+        emit_event "warnings" "FPPD Warnings" "fa-exclamation-triangle" "$status" "$message"
     else
-        CNT=$(jq '.[]' "$WARNING_FILE" 2>/dev/null | wc -l)
-        if [ "$CNT" == "0" ]; then
+        CNT=$(jq 'length' "$WARNING_FILE" 2>/dev/null)
+        if [ "${CNT:-0}" == "0" ]; then
             status="pass"
             message="No warnings"
+            emit_event "warnings" "FPPD Warnings" "fa-exclamation-triangle" "$status" "$message"
         else
             status="warn"
             message="${CNT} warning(s) found"
+            local details
+            details=$(jq -c '.' "$WARNING_FILE" 2>/dev/null)
+            echo "data: {\"id\":\"warnings\",\"label\":\"FPPD Warnings\",\"icon\":\"fa-exclamation-triangle\",\"status\":\"$status\",\"message\":\"$message\",\"details\":$details}"
+            echo ""
+            WARN_COUNT=$((WARN_COUNT + 1))
         fi
     fi
-
-    emit_event "warnings" "FPPD Warnings" "fa-exclamation-triangle" "$status" "$message"
 }
 
 HC_Scheduler() {
@@ -115,7 +121,7 @@ HC_HostName() {
         message="Using default 'FPP'"
     fi
 
-    emit_event "hostname" "Hostname" "fa-server" "$status" "$message"
+    emit_event "hostname" "Unique Hostname" "fa-server" "$status" "$message"
 }
 
 HC_CheckGateways() {

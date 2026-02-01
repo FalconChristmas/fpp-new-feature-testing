@@ -1630,12 +1630,39 @@ function humanFileSize($bytes)
 }
 
 /**
- * Returns current memory usage
- * @return float|int
+ * Returns memory information: used, free, buffer/cache breakdown
+ * All sizes are in bytes.
+ *
+ * @return array {
+ *   'total'              => int,   Total physical memory
+ *   'free'               => int,   Free (unused) memory
+ *   'used'               => int,   Used memory excluding buffers/cache
+ *   'buffers'            => int,   Kernel buffer memory
+ *   'cached'             => int,   Page cache memory
+ *   'buffer_cache'       => int,   Combined buffers + cached
+ *   'usage_percent'      => float, Used memory as % of total
+ *   'buffer_percent'     => float, Buffer/cache as % of total
+ *   'free_percent'       => float, Free memory as % of total
+ *   'total_used_percent' => float, (Used + buffer/cache) as % of total
+ * }
  */
-function get_server_memory_usage()
+function get_server_memory_info()
 {
     global $settings;
+
+    $info = [
+        'total' => 0,
+        'free' => 0,
+        'used' => 0,
+        'buffers' => 0,
+        'cached' => 0,
+        'buffer_cache' => 0,
+        'usage_percent' => 0,
+        'buffer_percent' => 0,
+        'free_percent' => 0,
+        'total_used_percent' => 0,
+    ];
+
     if (file_exists("/proc/meminfo")) {
         $fh = fopen('/proc/meminfo', 'r');
         $total = 0;
@@ -1643,30 +1670,57 @@ function get_server_memory_usage()
         $buffers = 0;
         $cached = 0;
         while ($line = fgets($fh)) {
-            $pieces = array();
-            if (preg_match('/^MemTotal:\s+(\d+)\skB$/', $line, $pieces)) {
-                $total = $pieces[1];
-            } else if (preg_match('/^MemFree:\s+(\d+)\skB$/', $line, $pieces)) {
-                $free = $pieces[1];
-            } else if (preg_match('/^Buffers:\s+(\d+)\skB$/', $line, $pieces)) {
-                $buffers = $pieces[1];
-            } else if (preg_match('/^Cached:\s+(\d+)\skB$/', $line, $pieces)) {
-                $cached = $pieces[1];
+            if (preg_match('/^MemTotal:\s+(\d+)\skB$/', $line, $m)) {
+                $total = $m[1] * 1024;
+            } else if (preg_match('/^MemFree:\s+(\d+)\skB$/', $line, $m)) {
+                $free = $m[1] * 1024;
+            } else if (preg_match('/^Buffers:\s+(\d+)\skB$/', $line, $m)) {
+                $buffers = $m[1] * 1024;
+            } else if (preg_match('/^Cached:\s+(\d+)\skB$/', $line, $m)) {
+                $cached = $m[1] * 1024;
             }
         }
         fclose($fh);
 
+        $buffer_cache = $buffers + $cached;
         $used = $total - $free - $buffers - $cached;
-        $memory_usage = 1.0 * $used / $total * 100;
+
+        $info['total'] = $total;
+        $info['free'] = $free;
+        $info['used'] = $used;
+        $info['buffers'] = $buffers;
+        $info['cached'] = $cached;
+        $info['buffer_cache'] = $buffer_cache;
+
+        if ($total > 0) {
+            $info['usage_percent'] = $used / $total * 100;
+            $info['buffer_percent'] = $buffer_cache / $total * 100;
+            $info['free_percent'] = $free / $total * 100;
+            $info['total_used_percent'] = ($used + $buffer_cache) / $total * 100;
+        }
     } else if ($settings["Platform"] == "MacOS") {
         $output = exec("memory_pressure | grep System-wide");
         $array = explode(":", $output);
-        $memory_usage = trim(rtrim($array[1], "%"));
-        $memory_usage = 100 - $memory_usage;
-    } else {
-        $memory_usage = 0;
+        $pct = 100 - trim(rtrim($array[1], "%"));
+        $info['usage_percent'] = $pct;
+        $info['total_used_percent'] = $pct;
     }
-    return $memory_usage;
+
+    return $info;
+}
+
+/**
+ * Returns current memory usage as a percentage for about.php 
+ * TODO: DELETE ME WHEN ABOUT.PHP IS REMOVED
+ *
+ * @deprecated Use get_server_memory_info() for detailed memory breakdown
+ *             including used, free, buffer/cache, and percentages.
+ * @return float|int
+ */
+function get_server_memory_usage()
+{
+    $info = get_server_memory_info();
+    return $info['usage_percent'];
 }
 
 /**
@@ -1812,7 +1866,21 @@ function get_cpu_stats()
 }
 
 /**
+ * Returns raw cumulative CPU counters from /proc/stat,
+ */
+function get_cpu_stats_raw()
+{
+    global $settings;
+    if ($settings["Platform"] == "MacOS") {
+        $output = exec("ps -A -o %cpu | awk '{s+=$1} END {print s}'");
+        return array('mac' => floatval($output));
+    }
+    return get_cpu_stats();
+}
+
+/**
  * Returns average CPU usage
+ * Still used by GetSystemInfoJsonInternal() which feeds api/system/info
  * @return mixed
  */
 function get_server_cpu_usage()

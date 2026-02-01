@@ -1,3 +1,13 @@
+<?php
+if (isset($_GET['cpu'])) {
+    $skipJSsettings = true;
+    require_once 'config.php';
+    require_once 'common.php';
+    header('Content-Type: application/json');
+    echo json_encode(['cpu' => get_cpu_stats_raw()]);
+    exit;
+}
+?>
 <!DOCTYPE html>
 <html>
 
@@ -58,11 +68,35 @@
             receivedChecks[check.id] = true;
 
             if (statusEl.length) {
-                // Update the status content
-                statusEl.html(
+                var statusHtml =
                     '<i class="fas ' + getStatusIcon(check.status) + ' fpp-health-check__status-icon"></i>' +
-                    '<span class="fpp-health-check__status-text" title="' + check.message + '">' + check.message + '</span>'
-                );
+                    '<span class="fpp-health-check__status-text" title="' + check.message + '">' + check.message + '</span>';
+
+                // Add expand icon if warning details are present
+                if (check.details && check.details.length > 0) {
+                    statusHtml += '<i class="fas fa-chevron-down fpp-health-check__expand-icon"></i>';
+                }
+
+                statusEl.html(statusHtml);
+
+                // Expandable details (warnings)
+                if (check.details && check.details.length > 0) {
+                    itemEl.addClass('fpp-health-check__item--expandable');
+                    itemEl.off('click').on('click', function() {
+                        $(this).toggleClass('fpp-health-check__item--expanded');
+                        $('#details-' + check.id).toggleClass('fpp-health-check__details--visible');
+                    });
+
+                    $('#details-' + check.id).remove();
+                    var detailsHtml = '<div class="fpp-health-check__details" id="details-' + check.id + '"><ul>';
+                    check.details.forEach(function(detail) {
+                        var escaped = $('<span>').text(detail).html();
+                        detailsHtml += '<li><i class="fas fa-circle"></i> ' + escaped + '</li>';
+                    });
+                    detailsHtml += '</ul></div>';
+                    itemEl.after(detailsHtml);
+                }
+
                 // Show the item if it was hidden (conditional check)
                 if (itemEl.length && conditionalChecks.includes(check.id)) {
                     itemEl.show();
@@ -82,7 +116,7 @@
             left: [
                 { id: 'fppd', label: 'FPPD Daemon', icon: 'fa-play-circle', static: true },
                 { id: 'warnings', label: 'FPPD Warnings', icon: 'fa-exclamation-triangle', static: true },
-                { id: 'hostname', label: 'Hostname', icon: 'fa-server', static: true },
+                { id: 'hostname', label: 'Unique Hostname', icon: 'fa-server', static: true },
                 { id: 'rootdisk', label: 'Root Filesystem', icon: 'fa-hdd', static: true },
                 { id: 'ntp', label: 'Time Sync (NTP)', icon: 'fa-clock', static: true },
                 { id: 'scheduler', label: 'Scheduler', icon: 'fa-calendar-alt', static: false }
@@ -245,7 +279,38 @@
             return parseFloat((bytes / Math.pow(k, i)).toFixed(decimals)) + ' ' + sizes[i];
         }
 
+        // CPU: EMA smoothing - reduce jitter
+        var cpuPrev = null;
+        var cpuEma = null;
+        var cpuAlpha = 0.4;
+        // 2 polls (~10 sec) to reach ~64% of a sustained change
+        // 4 polls (~20 sec) to reach ~87%
+        // 5 polls (~25 sec) to reach ~92%
+        function updateCpuGauge() {
+            $.getJSON('system-stats.php?cpu=1', function (data) {
+                var raw;
+                if (data.cpu.mac !== undefined) {
+                    raw = data.cpu.mac;
+                } else {
+                    var cur = data.cpu.map(Number);
+                    var idle, total = 0;
+                    if (cpuPrev) {
+                        idle = cur[3] - cpuPrev[3];
+                        for (var i = 0; i < cur.length; i++) total += cur[i] - cpuPrev[i];
+                    } else {
+                        idle = cur[3];
+                        for (var i = 0; i < cur.length; i++) total += cur[i];
+                    }
+                    raw = (total > 0) ? 100 - (idle * 100 / total) : 0;
+                    cpuPrev = cur;
+                }
+                cpuEma = (cpuEma === null) ? raw : cpuAlpha * raw + (1 - cpuAlpha) * cpuEma;
+                updateGauge('cpuGauge', cpuEma, { yellow: 60, red: 80, unit: '%' });
+            });
+        }
+
         function updateStats() {
+            updateCpuGauge();
             $.get('api/system/status', function (data) {
                 // Temperature
                 if (data.sensors && data.sensors.length > 0) {
@@ -253,10 +318,10 @@
                     <?php if (isset($settings['temperatureInF']) && $settings['temperatureInF'] == 1) { ?>
                         temp = (temp * 9 / 5) + 32;
                         // Fahrenheit thresholds: 140°F (60°C), 176°F (80°C), max 212°F (100°C)
-                        updateGauge('tempGauge', temp, { yellow: 140, red: 176, max: 212, unit: '°' });
+                        updateGauge('tempGauge', temp, { yellow: 140, red: 176, max: 212, unit: '°F' });
                     <?php } else { ?>
                         // Celsius thresholds: 60°C, 80°C, max 100°C
-                        updateGauge('tempGauge', temp, { yellow: 60, red: 80, max: 100, unit: '°' });
+                        updateGauge('tempGauge', temp, { yellow: 60, red: 80, max: 100, unit: '°C' });
                     <?php } ?>
                 }
 
@@ -288,6 +353,7 @@
                     $('#load-1min-value').text(load1.toFixed(2));
                     $('#load-1min-bar').css('width', pct1 + '%').attr('aria-valuenow', pct1);
                     updateLoadColor($('#load-1min-bar'), pct1);
+                    updateBusynessStatus(pct1);
 
                     var load5 = parseFloat(loads[1]);
                     var pct5 = Math.min((load5 / cores) * 100, 100);
@@ -305,17 +371,6 @@
                 $('#cpu-cores').text(cores);
             });
 
-            $.get('api/system/info', function (data) {
-                // CPU Usage
-                if (data.Utilization && data.Utilization.CPU !== undefined) {
-                    updateGauge('cpuGauge', parseFloat(data.Utilization.CPU), { yellow: 60, red: 80, unit: '%' });
-                }
-
-                // Memory Usage
-                if (data.Utilization && data.Utilization.Memory !== undefined) {
-                    updateGauge('memGauge', parseFloat(data.Utilization.Memory), { yellow: 60, red: 80, unit: '%' });
-                }
-            });
 
             // Update disk storage - using server-side data
             updateDiskStorage();
@@ -421,6 +476,27 @@
             } else {
                 element.addClass('bg-success');
             }
+        }
+
+        function updateBusynessStatus(pct) {
+            var statusEl = document.getElementById('busyness-status');
+            if (!statusEl) return;
+            var text, icon, cls;
+            if (pct > 90) {
+                text = 'Overloaded';
+                icon = 'fa-exclamation-triangle';
+                cls = 'fpp-status--fail';
+            } else if (pct > 70) {
+                text = 'Busy';
+                icon = 'fa-exclamation-circle';
+                cls = 'fpp-status--warn';
+            } else {
+                text = 'Running smoothly';
+                icon = 'fa-check-circle';
+                cls = 'fpp-status--pass';
+            }
+            statusEl.innerHTML = '<i class="fas ' + icon + ' ' + cls + '"></i> ' + text;
+            statusEl.className = 'busyness-status ' + cls;
         }
 
         function updatePlayerStats() {
@@ -560,21 +636,81 @@
                         </div>
                     </div>
                     <div class="col-md-4">
+                        <?php
+                        $memInfo = get_server_memory_info();
+                        $memTotal = $memInfo['total'];
+                        $memFree = $memInfo['free'];
+                        $memUsed = $memInfo['used'];
+                        $memBufferCache = $memInfo['buffer_cache'];
+                        $memUsage = $memInfo['usage_percent'];
+                        $memBufferUsage = $memInfo['buffer_percent'];
+                        $memFreeUsage = $memInfo['free_percent'];
+                        $memTotalUsage = $memInfo['total_used_percent'];
+                        $memClass = "fpp-gauge__fill--success";
+                        if ($memUsage > 60) $memClass = "fpp-gauge__fill--warning";
+                        if ($memUsage > 80) $memClass = "fpp-gauge__fill--danger";
+
+                        function formatMemBytes($bytes, $decimals = 1) {
+                            if ($bytes == 0) return '0 B';
+                            $k = 1024;
+                            $sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+                            $i = floor(log($bytes) / log($k));
+                            return round($bytes / pow($k, $i), $decimals) . ' ' . $sizes[$i];
+                        }
+                        ?>
                         <div class="card compact-card fpp-gauge">
                             <div class="card-header">
-                                <h5><i class="fa-solid fa-memory"></i> Memory Usage</h5>
+                                <h5>
+                                    <span><i class="fa-solid fa-memory"></i> Memory Usage</span>
+                                    <i class="fas fa-question-circle fpp-help-popover"
+                                        data-help-content="memoryHelpContent" data-help-title="Memory Types"
+                                        style="font-size: 0.8em; cursor: help; margin-left: auto;"></i>
+                                </h5>
+                            </div>
+                            <div id="memoryHelpContent" style="display: none;">
+                                <div class="memory-help">
+                                    <p><span class="memory-help__color memory-help__color--used"></span><strong>Used Memory</strong><br>
+                                    Memory actively used by applications and the OS.</p>
+                                    <p><span class="memory-help__color memory-help__color--buffer"></span><strong>Buffer/Cache</strong><br>
+                                    Memory used for disk caching. Can be reclaimed if needed.</p>
+                                    <p><span class="memory-help__color memory-help__color--free"></span><strong>Free Memory</strong><br>
+                                    Completely unused memory.</p>
+                                    <hr>
+                                    <p style="margin-bottom:0;"><em>High buffer/cache is normal — it means your system is efficiently using available RAM.</em></p>
+                                </div>
                             </div>
                             <div class="card-body">
                                 <div class="fpp-gauge__container">
                                     <div class="fpp-gauge__circle">
                                         <svg viewBox="0 0 100 100">
                                             <circle class="fpp-gauge__bg" cx="50" cy="50" r="45"></circle>
-                                            <circle class="fpp-gauge__fill fpp-gauge__fill--success" id="memGaugeFill" cx="50" cy="50" r="45" stroke-dasharray="0 282.7"></circle>
+                                            <circle class="fpp-gauge__fill <?php echo $memClass; ?>" id="memGaugeFill" cx="50" cy="50" r="45"
+                                                stroke-dasharray="<?php printf('%.1f', $memUsage * 2.827); ?> 282.7">
+                                                <title>Used: <?php echo formatMemBytes($memUsed); ?> (<?php printf('%.1f', $memUsage); ?>%)</title>
+                                            </circle>
+                                            <circle class="fpp-gauge__fill fpp-gauge__fill--buffer" cx="50" cy="50" r="45"
+                                                stroke-dasharray="<?php printf('%.1f', $memBufferUsage * 2.827); ?> 282.7"
+                                                style="transform: rotate(<?php printf('%.1f', $memUsage * 3.6); ?>deg); transform-origin: 50% 50%;">
+                                                <title>Buffer/Cache: <?php echo formatMemBytes($memBufferCache); ?> (<?php printf('%.1f', $memBufferUsage); ?>%)</title>
+                                            </circle>
+                                            <circle class="fpp-gauge__fill fpp-gauge__fill--free" cx="50" cy="50" r="45"
+                                                stroke-dasharray="<?php printf('%.1f', $memFreeUsage * 2.827); ?> 282.7"
+                                                style="transform: rotate(<?php printf('%.1f', $memTotalUsage * 3.6); ?>deg); transform-origin: 50% 50%;">
+                                                <title>Free: <?php echo formatMemBytes($memFree); ?> (<?php printf('%.1f', $memFreeUsage); ?>%)</title>
+                                            </circle>
                                         </svg>
-                                        <div class="fpp-gauge__value" id="memValue">--%</div>
+                                        <div class="fpp-gauge__value" id="memValue">
+                                            <?php printf('%.0f', $memTotalUsage); ?>%
+                                            <span class="fpp-gauge__total"><?php echo formatMemBytes($memTotal); ?></span>
+                                        </div>
                                     </div>
                                 </div>
-                                <div class="fpp-gauge__label">RAM Utilization</div>
+                                <div class="fpp-gauge__label">
+                                    <?php echo formatMemBytes($memUsed); ?> used
+                                    <span style="opacity: 0.7; margin-left: 4px;">(+<?php echo formatMemBytes($memBufferCache); ?> cache)</span>
+                                    <br>
+                                    <span style="opacity: 0.7;"><?php echo formatMemBytes($memFree); ?> free</span>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -593,7 +729,7 @@
                                         <div class="fpp-gauge__value" id="tempValue">--°</div>
                                     </div>
                                 </div>
-                                <div class="fpp-gauge__label" id="tempLabel">CPU Temperature</div>
+                                <div class="fpp-gauge__label" id="tempLabel">CPU Temperature (<?php echo (isset($settings['temperatureInF']) && $settings['temperatureInF'] == 1) ? '°F' : '°C'; ?>)</div>
                             </div>
                         </div>
                     </div>
@@ -677,15 +813,41 @@
 
                     <!-- Load Average -->
                     <div class="col-md-4">
+                        <?php
+                        $_la = sys_getloadavg();
+                        $_nc = 4;
+                        if (file_exists('/proc/cpuinfo')) {
+                            preg_match_all('/^processor/m', file_get_contents('/proc/cpuinfo'), $_m);
+                            $_nc = count($_m[0]) ?: 4;
+                        }
+                        $_lp = min(($_la[0] / $_nc) * 100, 100);
+                        $_traffic = $_lp > 90 ? 'heavy' : ($_lp > 70 ? 'moderate' : 'light');
+                        ?>
                         <div class="card compact-card">
                             <div class="card-header">
-                                <h3>
-                                    <i class="fas fa-tachometer-alt"></i> Load Average
-                                    <i class="fas fa-question-circle" data-bs-toggle="popover" data-bs-trigger="hover"
-                                        data-bs-placement="top"
-                                        data-bs-content="Load average represents the average system load over 1, 5, and 15 minute periods. Values are normalized to CPU core count. Green = healthy, Yellow = moderate load, Red = high load."
-                                        style="font-size: 0.8em; cursor: help;"></i>
+                                <h3 style="display: flex; align-items: center;">
+                                    <span><i class="fas fa-tachometer-alt"></i> System Busyness</span>
+                                    <i class="fas fa-question-circle fpp-help-popover"
+                                        data-help-content="busynessHelpContent" data-help-title="System Busyness"
+                                        style="font-size: 0.8em; cursor: help; margin-left: auto;"></i>
                                 </h3>
+                            </div>
+                            <?php
+                            $coresNum = (int)$cores;
+                            $threshGreen = number_format($coresNum * 0.70, 2);
+                            $threshYellow = number_format($coresNum * 0.90, 2);
+                            ?>
+                            <div id="busynessHelpContent" style="display: none;">
+                                <div class="busyness-help">
+                                    <p><span class="busyness-help__color busyness-help__color--green"></span><strong>Running smoothly</strong> (below <?= $threshGreen ?>)<br>
+                                    Traffic is light — your system has plenty of capacity.</p>
+                                    <p><span class="busyness-help__color busyness-help__color--yellow"></span><strong>Busy</strong> (<?= $threshGreen ?> – <?= $threshYellow ?>)<br>
+                                    Traffic is moderate — things are getting congested.</p>
+                                    <p><span class="busyness-help__color busyness-help__color--red"></span><strong>Overloaded</strong> (above <?= $threshYellow ?>)<br>
+                                    Traffic is heavy — your system is in gridlock.</p>
+                                    <hr>
+                                    <p style="margin-bottom:0;"><em>Your system is like a highway with <?= $coresNum ?> lanes (CPU cores). The numbers show average load over 1, 5, and 15 minutes. Right now, traffic is <?= $_traffic ?>.</em></p>
+                                </div>
                             </div>
                             <div class="card-body">
                                 <div class="load-bar-container">
@@ -721,6 +883,7 @@
                                         </div>
                                     </div>
                                 </div>
+                                <div id="busyness-status" class="busyness-status"></div>
                                 <div class="load-avg-info">
                                     <i class="fas fa-microchip"></i> <span id="cpu-cores">--</span> CPU cores available
                                 </div>
@@ -777,6 +940,20 @@
         var popoverTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="popover"]'));
         var popoverList = popoverTriggerList.map(function (popoverTriggerEl) {
             return new bootstrap.Popover(popoverTriggerEl);
+        });
+
+        document.querySelectorAll('.fpp-help-popover').forEach(function (icon) {
+            var contentEl = document.getElementById(icon.dataset.helpContent);
+            if (contentEl) {
+                new bootstrap.Popover(icon, {
+                    title: icon.dataset.helpTitle || '',
+                    content: contentEl.innerHTML,
+                    html: true,
+                    trigger: 'hover focus',
+                    placement: 'bottom',
+                    sanitize: false
+                });
+            }
         });
     </script>
 </body>
