@@ -118,7 +118,6 @@
 				"temperatureInF",
 				"Latitude",
 				"Longitude"
-
 			]
 		},
 		"generalAudio": {
@@ -126,17 +125,26 @@
 			"settings": [
 				"AudioOutput",
 				"AudioBackend",
-				"AudioMixerDevice",
-				"AudioFormat",
 				"AudioLayout",
-				"AudioBufferSize",
-				"AudioPeriodSize",
-				"ForceAudioId",
 				"WLEDAudioInput",
 				"disableIPAnnouncement",
 				"disableAudioVolumeSlider",
 				"globalMediaOffset"
 			]
+		},
+		"alsaHardwareAudio": {
+			"description": "ALSA / Hardware Audio",
+			"settings": [
+				"AudioMixerDevice",
+				"AudioFormat",
+				"AudioBufferSize",
+				"AudioPeriodSize",
+				"ForceAudioId"
+			]
+		},
+		"pipewireAudio": {
+			"description": "PipeWire Audio",
+			"settings": []
 		},
 		"generalVideo": {
 			"description": "Video",
@@ -2356,22 +2364,22 @@
 				"!MacOS"
 			]
 		},
-                "KioskRotate": {
-                        "name": "KioskRotate",
-                        "description": "Rotate Kiosk if using Raspberry Pi Touch Display 2 7inch",
-                        "tip": "Click here if you have Raspberry Pi Touch Display 2",
-                        "level": 1,
-                        "gatherStats": true,
-                        "restart": 0,
-                        "reboot": 0,
-                        "checkedValue": "1",
-                        "uncheckedValue": "0",
-                        "default": "0",
-                        "type": "checkbox",
-                        "platforms": [
-                            "Raspberry Pi"
-                        ]
-                },
+		"KioskRotate": {
+			"name": "KioskRotate",
+			"description": "Rotate Kiosk if using Raspberry Pi Touch Display 2 7inch",
+			"tip": "Click here if you have Raspberry Pi Touch Display 2",
+			"level": 1,
+			"gatherStats": true,
+			"restart": 0,
+			"reboot": 0,
+			"checkedValue": "1",
+			"uncheckedValue": "0",
+			"default": "0",
+			"type": "checkbox",
+			"platforms": [
+				"Raspberry Pi"
+			]
+		},
 		"Service_rsync": {
 			"name": "Service_rsync",
 			"description": "Enable rsync",
