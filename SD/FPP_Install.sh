@@ -1528,8 +1528,10 @@ cp /opt/fpp/etc/systemd/*.service /lib/systemd/system/
 cp /opt/fpp/etc/avahi/* /etc/avahi/services
 mkdir -p /etc/pipewire /etc/pipewire/pipewire.conf.d
 cp -a /opt/fpp/etc/pipewire/pipewire.conf.d/. /etc/pipewire/pipewire.conf.d/
-mkdir -p /etc/wireplumber/main.lua.d
-cp -a /opt/fpp/etc/wireplumber/main.lua.d/. /etc/wireplumber/main.lua.d/
+mkdir -p /etc/wireplumber/wireplumber.conf.d
+cp -a /opt/fpp/etc/wireplumber/wireplumber.conf.d/. /etc/wireplumber/wireplumber.conf.d/
+# Clean up old WirePlumber 0.4 Lua configs if present
+rm -rf /etc/wireplumber/main.lua.d
 if [ ! -f /etc/pipewire/pipewire.conf ] && [ -f /usr/share/pipewire/pipewire.conf ]; then
     cp /usr/share/pipewire/pipewire.conf /etc/pipewire/pipewire.conf
 fi
@@ -1627,11 +1629,11 @@ if $isimage; then
     
     # Setup the fpp user so all the pipewire daemons don't startup when user fpp logs in
     mkdir -p /home/fpp/.config/systemd/user
-    ln -s /dev/mull  /home/fpp/.config/systemd/user/pipewire.socket
-    ln -s /dev/mull  /home/fpp/.config/systemd/user/pipewire.service
-    ln -s /dev/mull  /home/fpp/.config/systemd/user/pipewire-pulse.service
-    ln -s /dev/mull  /home/fpp/.config/systemd/user/pipewire-pulse.socket
-    ln -s /dev/mull  /home/fpp/.config/systemd/user/wireplumber.service
+    ln -sf /dev/null /home/fpp/.config/systemd/user/pipewire.socket
+    ln -sf /dev/null /home/fpp/.config/systemd/user/pipewire.service
+    ln -sf /dev/null /home/fpp/.config/systemd/user/pipewire-pulse.service
+    ln -sf /dev/null /home/fpp/.config/systemd/user/pipewire-pulse.socket
+    ln -sf /dev/null /home/fpp/.config/systemd/user/wireplumber.service
     chown -R fpp:fpp /home/fpp/.config
 fi
 if [ "$FPPPLATFORM" == "BeagleBone Black" ]; then
