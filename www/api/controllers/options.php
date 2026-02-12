@@ -373,6 +373,7 @@ function GetOptions_AES67Interface()
 }
 
 /////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////
 // GET /api/options/:SettingName
 function GetOptions()
 {
@@ -411,6 +412,7 @@ function GetOptions()
             return GetOptions_GPIOS(true);
         case 'AES67Interface':
             return GetOptions_AES67Interface();
+
     }
 
     return json("{}");
