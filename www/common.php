@@ -662,6 +662,49 @@ function PrintSetting($setting, $callback = '', $options = array(), $plugin = ''
 
                 PrintSettingTextSaved($setting, $restart, $reboot, $max, $min, $plugin, $default, $callback, '', 'number', $s);
                 break;
+            case 'modal':
+                // Renders a button that opens a fullscreen modal dialog with an iframe
+                // settings.json properties:
+                //   modalUrl      - URL to load in the modal iframe (required)
+                //   icon          - FontAwesome icon class (e.g. "fas fa-layer-group")
+                //   buttonText    - Text for the button (defaults to description)
+                //   buttonClass   - Bootstrap button class (defaults to "btn-success")
+                //   modalTitle    - Title for the modal dialog (defaults to description)
+                //   modalId       - HTML id for the modal (defaults to setting name + "Dlg")
+                $modalUrl = isset($s['modalUrl']) ? $s['modalUrl'] : '';
+                $icon = isset($s['icon']) ? $s['icon'] : '';
+                $buttonText = isset($s['buttonText']) ? $s['buttonText'] : $s['description'];
+                $buttonClass = isset($s['buttonClass']) ? $s['buttonClass'] : 'btn-success';
+                $modalTitle = isset($s['modalTitle']) ? $s['modalTitle'] : $s['description'];
+                $modalId = isset($s['modalId']) ? $s['modalId'] : $setting . 'Dlg';
+                $iconHtml = $icon ? "<i class='" . htmlspecialchars($icon) . "'></i> " : '';
+
+                echo "<button class='btn " . htmlspecialchars($buttonClass) . " btn-sm' onclick='OpenSettingModal_" . $setting . "()'>";
+                echo $iconHtml . htmlspecialchars($buttonText);
+                echo "</button>";
+
+                echo "<script>\n";
+                echo "function OpenSettingModal_" . $setting . "() {\n";
+                echo "    DoModalDialog({\n";
+                echo "        id: '" . $modalId . "',\n";
+                echo "        title: '" . addslashes($iconHtml . $modalTitle) . "',\n";
+                echo "        body: '<iframe src=\"" . addslashes($modalUrl) . "\" style=\"width:100%;height:100%;border:none;\"></iframe>',\n";
+                echo "        open: function () {\n";
+                echo "            var dlg = $('#" . $modalId . "');\n";
+                echo "            dlg.find('.modal-dialog').addClass('modal-fullscreen');\n";
+                echo "            dlg.find('.modal-content').css({ 'background': '#fff', 'color': '#212529' });\n";
+                echo "            dlg.find('.modal-body').css({ 'padding': '0', 'overflow': 'hidden' });\n";
+                echo "            dlg.find('.modal-header').css({ 'background': '#fff', 'color': '#212529' });\n";
+                echo "        },\n";
+                echo "        buttons: {\n";
+                echo "            Close: function () {\n";
+                echo "                bootstrap.Modal.getInstance(document.getElementById('" . $modalId . "')).hide();\n";
+                echo "            }\n";
+                echo "        }\n";
+                echo "    });\n";
+                echo "}\n";
+                echo "</script>\n";
+                break;
             default:
                 printf("FIXME, handle %s setting type for %s\n", $s['type'], $setting);
                 break;
@@ -1055,7 +1098,7 @@ function " . $changedFunction . "() {
     }
 
     echo "</select>\n";
-    
+
     // If we auto-selected a different value, output JavaScript to update the setting
     if ($shouldAutoSelect && $newValue != $currentValue) {
         echo "<script>\n";
@@ -3020,11 +3063,11 @@ function json_object_validate($json, $depth = 512, $flags = 0)
  * @param int $max_size_bytes The maximum allowed response size in bytes.
  * @return string|false The API response body as a string if successful and within size limit, otherwise false.
  */
-function fetch_api_with_limit(string $url, int $max_size_bytes = 1024*50): string|false
+function fetch_api_with_limit(string $url, int $max_size_bytes = 1024 * 50): string|false
 {
     // Initialize a cURL session to check the Content-Length header.
     $ch_head = curl_init($url);
-    
+
     // Set cURL options for a HEAD request.
     curl_setopt($ch_head, CURLOPT_RETURNTRANSFER, true); // Return the transfer as a string
     curl_setopt($ch_head, CURLOPT_HEADER, true);       // Include header in output
@@ -3033,22 +3076,22 @@ function fetch_api_with_limit(string $url, int $max_size_bytes = 1024*50): strin
 
     // Execute the HEAD request.
     $response_headers = curl_exec($ch_head);
-    
+
     // Check for cURL errors.
     if (curl_errno($ch_head)) {
         curl_close($ch_head);
         return false;
     }
-    
+
     // Close the cURL session.
     curl_close($ch_head);
 
     // Extract the content length from the response headers.
     $content_length = -1;
     if (preg_match('/Content-Length: (\d+)/i', $response_headers, $matches)) {
-        $content_length = (int)$matches[1];
+        $content_length = (int) $matches[1];
     }
-    
+
     // If Content-Length is unavailable or exceeds the max size, return false.
     // Some APIs may not provide a Content-Length header. Don't handle this.
     if ($content_length > -1 && $content_length > $max_size_bytes) {
