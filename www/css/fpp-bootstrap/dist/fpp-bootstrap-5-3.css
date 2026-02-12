@@ -18500,18 +18500,30 @@ input[type=checkbox][disabled=""]:checked {
 }
 
 .jGrowl-notification {
-  opacity: 1;
+  background-color: #000;
+  border: 1px solid #000;
+  color: #fff;
+  opacity: 0.9;
+  border-radius: 5px;
+}
+.jGrowl-notification.ui-state-highlight {
+  background-color: #000;
+  border-color: #000;
+  color: #fff;
 }
 .jGrowl-notification.ui-state-success {
   background-color: #56B760;
+  border-color: #56B760;
   color: #fff;
 }
 .jGrowl-notification.ui-state-danger, .jGrowl-notification.ui-state-error {
   background-color: #F63939;
+  border-color: #F63939;
   color: #fff;
 }
 .jGrowl-notification.ui-state-detract {
   background-color: #F2BC5F;
+  border-color: #F2BC5F;
   color: #fff;
 }
 
@@ -18519,6 +18531,7 @@ input[type=checkbox][disabled=""]:checked {
   background-color: #dee2e6;
   color: #171720;
   opacity: 1;
+  border-radius: 5px;
 }
 
 .skeleton-loader div {
