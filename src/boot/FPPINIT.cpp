@@ -1855,10 +1855,10 @@ static void setupAudio() {
                             << "      audio.channels = " << channels << "\n"
                             << "      audio.position = " << audioPos << "\n"
                             << "      stream.props = {\n"
+                            << "        rtp.payload = 96\n"
                             << "        node.name = \"" << nodeSafeName << "_send\"\n"
                             << "        node.description = \"" << sessionName << " (Send)\"\n"
                             << "        media.class = \"Audio/Sink\"\n"
-                            << "        sess.sap.announce = true\n"
                             << "      }\n"
                             << "    }\n"
                             << "  }\n";
@@ -1906,17 +1906,10 @@ static void setupAudio() {
                 if (!sapIface.empty()) {
                     sapConf << "      local.ifname = \"" << sapIface << "\"\n";
                 }
-                sapConf << "      sap.ip = \"224.2.127.254\"\n"
+                sapConf << "      sap.ip = \"239.255.255.255\"\n"
                         << "      sap.port = 9875\n"
-                        << "      net.ttl = 4\n"
+                        << "      net.ttl = 255\n"
                         << "      stream.rules = [\n"
-                        << "        { matches = [\n"
-                        << "            { sess.sap.announce = true }\n"
-                        << "          ]\n"
-                        << "          actions = {\n"
-                        << "            announce-stream = {}\n"
-                        << "          }\n"
-                        << "        }\n"
                         << "        { matches = [\n"
                         << "            { rtp.session = \"~.*\" }\n"
                         << "          ]\n"
