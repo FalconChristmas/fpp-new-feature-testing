@@ -219,6 +219,16 @@
     color: var(--fpp-text-secondary) !important;
 }
 
+/* Changelog/modal specific text styles */
+.fpp-text-date {
+    font-size: var(--fpp-fs-sm);
+    color: var(--fpp-text-secondary);
+}
+
+.fpp-icon-lead {
+    margin-right: 8px;
+}
+
 .fpp-bg-primary {
     background-color: var(--fpp-primary) !important;
 }
@@ -2032,6 +2042,156 @@
 
 .fpp-alert--mb-md {
     margin-bottom: var(--fpp-sp-md);
+}
+
+/* ==========================================================================
+   CHANGELOG SUMMARY (Standard View)
+   ========================================================================== */
+.fpp-changelog-summary {
+    padding: var(--fpp-sp-md);
+}
+
+.fpp-changelog-summary__intro {
+    font-size: var(--fpp-fs-lg);
+    margin-bottom: var(--fpp-sp-lg);
+    padding: var(--fpp-sp-md);
+    background: var(--fpp-success-light);
+    border-radius: var(--fpp-radius-md);
+    border-left: 4px solid var(--fpp-success);
+}
+
+.fpp-changelog-group {
+    margin-bottom: var(--fpp-sp-lg);
+}
+
+.fpp-changelog-group h5 {
+    font-size: var(--fpp-fs-base);
+    font-weight: var(--fpp-fw-semibold);
+    margin-bottom: var(--fpp-sp-sm);
+    display: flex;
+    align-items: center;
+    gap: var(--fpp-sp-sm);
+}
+
+.fpp-changelog-group ul {
+    margin: 0;
+    padding-left: var(--fpp-sp-xl);
+}
+
+.fpp-changelog-group li {
+    margin-bottom: var(--fpp-sp-xs);
+    line-height: 1.5;
+}
+
+/* Changelog info section (standard view) */
+.fpp-changelog-info {
+    margin-bottom: var(--fpp-sp-lg);
+}
+
+.fpp-changelog-info p {
+    font-weight: var(--fpp-fw-semibold);
+    color: var(--fpp-text-secondary);
+    margin-bottom: var(--fpp-sp-sm);
+}
+
+.fpp-changelog-info ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.fpp-changelog-info li {
+    display: flex;
+    align-items: center;
+    gap: var(--fpp-sp-sm);
+    padding: var(--fpp-sp-sm) 0;
+    color: var(--fpp-text-secondary);
+    border-bottom: 1px solid var(--fpp-border-light);
+}
+
+.fpp-changelog-info li:last-child {
+    border-bottom: none;
+}
+
+.fpp-changelog-info li i {
+    width: 20px;
+    text-align: center;
+}
+
+/* Changelog recommendation callout */
+.fpp-changelog-recommendation {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--fpp-sp-sm);
+    padding: var(--fpp-sp-md);
+    background: var(--fpp-info-light);
+    border-radius: var(--fpp-radius-md);
+    border-left: 4px solid var(--fpp-info);
+    font-size: var(--fpp-fs-sm);
+    color: var(--fpp-text-secondary);
+}
+
+.fpp-changelog-recommendation i {
+    color: var(--fpp-info);
+    margin-top: 2px;
+}
+
+/* Release notes display (from GitHub) */
+.fpp-release-title {
+    font-size: var(--fpp-fs-lg);
+    font-weight: var(--fpp-fw-semibold);
+    color: var(--fpp-text-primary);
+    margin: 0 0 var(--fpp-sp-md) 0;
+    display: flex;
+    align-items: center;
+    gap: var(--fpp-sp-sm);
+    padding-bottom: var(--fpp-sp-sm);
+    border-bottom: 1px solid var(--fpp-border-light);
+}
+
+.fpp-release-notes {
+    font-size: var(--fpp-fs-base);
+    line-height: 1.6;
+    color: var(--fpp-text-secondary);
+}
+
+.fpp-release-notes h3,
+.fpp-release-notes h4,
+.fpp-release-notes h5 {
+    color: var(--fpp-text-primary);
+    margin: var(--fpp-sp-lg) 0 var(--fpp-sp-sm) 0;
+    font-weight: var(--fpp-fw-semibold);
+}
+
+.fpp-release-notes h3 { font-size: var(--fpp-fs-lg); }
+.fpp-release-notes h4 { font-size: var(--fpp-fs-md); }
+.fpp-release-notes h5 { font-size: var(--fpp-fs-base); }
+
+.fpp-release-notes ul {
+    margin: var(--fpp-sp-sm) 0;
+    padding-left: var(--fpp-sp-xl);
+}
+
+.fpp-release-notes li {
+    margin-bottom: var(--fpp-sp-xs);
+}
+
+.fpp-release-notes code {
+    background: var(--fpp-bg-page);
+    padding: 2px 6px;
+    border-radius: var(--fpp-radius-sm);
+    font-size: 0.9em;
+}
+
+.fpp-release-notes p {
+    margin-bottom: var(--fpp-sp-md);
+}
+
+/* Version indicator subtle label */
+.fpp-version-indicator__label--subtle {
+    font-size: var(--fpp-fs-sm);
+    color: var(--fpp-text-secondary);
+    font-style: italic;
 }
 
 /* ==========================================================================

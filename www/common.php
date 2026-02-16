@@ -2112,6 +2112,30 @@ function get_remote_git_version()
     return $git_remote_version;
 }
 
+/**
+ * Returns a user-friendly version string for display to standard users
+ * For master/main branch: "FPP 9.x"
+ * For release branches (v9.3): "FPP 9.3"
+ * For other branches: "FPP 9.x (branch-name)"
+ * @return string
+ */
+function getFPPVersionDisplay()
+{
+    $major = getFPPMajorVersion();
+    $branch = getFPPBranch();
+
+    // For master/main branch, show "FPP 9.x" format
+    if ($branch == 'master' || $branch == 'main') {
+        return "FPP " . $major . ".x";
+    }
+    // For release branches (e.g., "v9.3"), show clean version
+    if (preg_match('/^v?(\d+\.\d+)/', $branch, $matches)) {
+        return "FPP " . $matches[1];
+    }
+    // Fallback: use major version with branch name
+    return "FPP " . $major . ".x (" . $branch . ")";
+}
+
 function ReplaceIllegalCharacters($input_string)
 {
     // Removes any of the following characters from the supplied name, can be used to cleanse playlist names, event names etc

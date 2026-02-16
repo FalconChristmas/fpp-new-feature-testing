@@ -13,6 +13,27 @@
     $fppVersion = getFPPVersion();
     $localGitVersion = get_local_git_version();
     $remoteGitVersion = get_remote_git_version();
+    $fppVersionDisplay = getFPPVersionDisplay();
+
+    $latestReleaseVersion = '';
+    $latestReleaseBody = '';
+    $latestReleaseName = '';
+    $latestReleaseUrl = '';
+    $ch = curl_init('https://api.github.com/repos/FalconChristmas/fpp/releases/latest');
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_USERAGENT, 'FPP');
+    curl_setopt($ch, CURLOPT_TIMEOUT, 5);
+    $response = curl_exec($ch);
+    curl_close($ch);
+    if ($response) {
+        $releaseData = json_decode($response, true);
+        if (isset($releaseData['tag_name'])) {
+            $latestReleaseVersion = $releaseData['tag_name'];
+            $latestReleaseName = $releaseData['name'] ?? $releaseData['tag_name'];
+            $latestReleaseBody = $releaseData['body'] ?? '';
+            $latestReleaseUrl = $releaseData['html_url'] ?? 'https://github.com/FalconChristmas/fpp/releases';
+        }
+    }
 
     $uploadDirectory = $mediaDirectory . "/upload";
     $freeSpace = disk_free_space($uploadDirectory);
@@ -34,172 +55,300 @@
     ?>
     <script>
         var osAssetMap = {};
+        var fppUpdateAvailable = false;
+        var osUpgradeAvailable = false;
+        var currentOSRelease = null;
 
-        function OpenChangelogModal() {
+        /**
+         * Parse OS version from release string or filename
+         * Extracts year-month pattern (e.g., "2025-11" from "v2025-11" or "Pi-9.3_2025-11.fppos")
+         */
+        function parseOSVersion(str) {
+            if (!str) return null;
+            var match = str.match(/(\d{4})-(\d{2})/);
+            if (match) {
+                return { year: parseInt(match[1]), month: parseInt(match[2]) };
+            }
+            return null;
+        }
+
+        /**
+         * Check if available OS version is newer than current
+         */
+        function isNewerOSVersion(available, current) {
+            if (!available || !current) return false;
+            if (available.year > current.year) return true;
+            if (available.year === current.year && available.month > current.month) return true;
+            return false;
+        }
+
+        /**
+         * Check if any available OS in the dropdown is newer than installed
+         */
+        function checkForNewerOS() {
+            var currentVersion = parseOSVersion(currentOSRelease);
+            if (!currentVersion) {
+                // Can't determine current version, fall back to old behavior
+                return $('#osSelect option').length > 1;
+            }
+
+            var hasNewerOS = false;
+            $('#osSelect option').each(function() {
+                if (this.value !== '') {
+                    var availableVersion = parseOSVersion(this.text);
+                    if (isNewerOSVersion(availableVersion, currentVersion)) {
+                        hasNewerOS = true;
+                        return false; // break out of each()
+                    }
+                }
+            });
+
+            return hasNewerOS;
+        }
+
+        // Cached git origin log data
+        var gitOriginLogCache = null;
+
+        /**
+         * Fetch git origin log with caching
+         * @param {function} callback - Called with data object or null on failure
+         * @param {boolean} forceRefresh - If true, bypasses cache
+         */
+        function fetchGitOriginLog(callback, forceRefresh) {
+            if (!forceRefresh && gitOriginLogCache !== null) {
+                callback(gitOriginLogCache);
+                return;
+            }
+
+            $.get('api/git/originLog', function(data) {
+                gitOriginLogCache = data;
+                callback(data);
+            }).fail(function() {
+                callback(null);
+            });
+        }
+
+        function buildGitLogTableHtml(data, options) {
+            options = options || {};
+            var showDate = options.showDate || false;
+            var commitWidth = options.commitWidth || '80px';
+            var authorWidth = options.authorWidth || '150px';
+            var dateWidth = options.dateWidth || '150px';
+            var colspan = showDate ? 4 : 3;
+            var emptyHtml = options.emptyHtml || '<tr><td colspan="' + colspan + '" class="text-center">No entries found</td></tr>';
+
+            var html = '<table class="table table-striped table-sm">';
+            html += '<thead><tr>';
+            html += '<th width="' + commitWidth + '">Commit</th>';
+            html += '<th width="' + authorWidth + '">Author</th>';
+            if (showDate) {
+                html += '<th width="' + dateWidth + '">Date</th>';
+            }
+            html += '<th>Message</th></tr></thead>';
+            html += '<tbody>';
+
+            if (data && data.rows && data.rows.length > 0) {
+                data.rows.forEach(function(row) {
+                    html += '<tr>';
+                    html += '<td><code>' + row.hash.substring(0, 8) + '</code></td>';
+                    html += '<td>' + row.author + '</td>';
+                    if (showDate) {
+                        html += '<td class="fpp-text-date">' + (row.date || '') + '</td>';
+                    }
+                    html += '<td>' + row.msg + '</td>';
+                    html += '</tr>';
+                });
+            } else {
+                html += emptyHtml;
+            }
+
+            html += '</tbody></table>';
+            return html;
+        }
+
+        /**
+         * Get commit count from cached or fresh git log data
+         */
+        function getGitCommitCount(callback) {
+            fetchGitOriginLog(function(data) {
+                var count = (data && data.rows) ? data.rows.length : 0;
+                callback(count);
+            });
+        }
+
+        // Helper: Show a loading modal with spinner
+        function ShowLoadingModal(id, title, modalClass) {
             DoModalDialog({
-                id: 'changelogModal',
-                title: 'FPP Changelog',
-                body: '<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Loading changelog...</div>',
-                class: 'modal-xl',
+                id: id,
+                title: title,
+                body: '<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Loading...</div>',
+                class: modalClass || 'modal-lg',
                 keyboard: true,
                 backdrop: true
             });
+        }
 
-            $.get('api/git/originLog', function (data) {
-                var html = '<div style="max-height: 70vh; overflow-y: auto;">';
-                html += '<p class="alert alert-info"><i class="fas fa-info-circle"></i> This shows the git commit history for your current branch. Each entry represents a change to the FPP software.</p>';
-                html += '<table class="table table-striped table-sm">';
-                html += '<thead><tr><th width="100px">Commit</th><th width="150px">Author</th><th width="150px">Date</th><th>Message</th></tr></thead>';
-                html += '<tbody>';
+        // Check if both FPP update and OS upgrade are available and show recommendation
+        function checkUpgradeRecommendation() {
+            if (fppUpdateAvailable && osUpgradeAvailable) {
+                // Check if this is a major version jump (e.g., v9 to v10)
+                var currentMajor = parseInt('<?= getFPPMajorVersion() ?>');
+                var osSelect = $('#osSelect option:selected').text();
+                var isMajorVersionJump = false;
 
-                if (data.rows && data.rows.length > 0) {
-                    data.rows.forEach(function (row) {
-                        html += '<tr>';
-                        html += '<td><code>' + row.hash.substring(0, 8) + '</code></td>';
-                        html += '<td>' + row.author + '</td>';
-                        html += '<td style="font-size: 0.85em; color: #666;">' + (row.date || '') + '</td>';
-                        html += '<td>' + row.msg + '</td>';
-                        html += '</tr>';
-                    });
-                } else {
-                    html += '<tr><td colspan="4" class="text-center">No changelog entries found</td></tr>';
+                // Try to detect major version from selected OS filename
+                var versionMatch = osSelect.match(/v?(\d+)\./i);
+                if (versionMatch) {
+                    var selectedMajor = parseInt(versionMatch[1]);
+                    isMajorVersionJump = selectedMajor > currentMajor;
                 }
 
-                html += '</tbody></table>';
+                if (isMajorVersionJump) {
+                    // Recommend OS upgrade for major version jumps
+                    $('#upgradeRecommendationTitle').text('Major Version Available');
+                    $('#upgradeRecommendationMessage').html(
+                        'A new major version of FPP is available. This requires an OS upgrade. ' +
+                        'Please <a href="backup.php">backup your configuration</a> first!'
+                    );
+                    $('#osRecommendedBadge').show();
+                    $('#fppRecommendedBadge').hide();
+                } else {
+                    // Recommend FPP update for regular updates (use default text)
+                    $('#upgradeRecommendationTitle').text('Recommended: Update FPP Software First');
+                    $('#upgradeRecommendationMessage').text(
+                        'Both a software update and OS upgrade are available. We recommend updating ' +
+                        'FPP software first - it\'s quick (2-5 min). It resolves any bugs and provides a clean upgrade path. '
+                    );
+                    $('#fppRecommendedBadge').show();
+                    $('#osRecommendedBadge').hide();
+                }
+                $('#upgradeRecommendationBanner').show();
+            } else {
+                $('#upgradeRecommendationBanner').hide();
+                $('#fppRecommendedBadge').hide();
+                $('#osRecommendedBadge').hide();
+            }
+        }
+
+        // Release notes data from PHP
+        var latestReleaseName = <?= json_encode($latestReleaseName) ?>;
+        var latestReleaseBody = <?= json_encode($latestReleaseBody) ?>;
+        var latestReleaseUrl = <?= json_encode($latestReleaseUrl ?: 'https://github.com/FalconChristmas/fpp/releases') ?>;
+        var latestReleaseVersion = <?= json_encode($latestReleaseVersion) ?>;
+
+        // Simple markdown to HTML converter for release notes
+        function markdownToHtml(md) {
+            if (!md) return '';
+            return md
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/^### (.+)$/gm, '<h5>$1</h5>')
+                .replace(/^## (.+)$/gm, '<h4>$1</h4>')
+                .replace(/^# (.+)$/gm, '<h3>$1</h3>')
+                .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*(.+?)\*/g, '<em>$1</em>')
+                .replace(/`(.+?)`/g, '<code>$1</code>')
+                .replace(/^[\-\*] (.+)$/gm, '<li>$1</li>')
+                .replace(/(<li>.*<\/li>\n?)+/g, function(match) {
+                    return '<ul>' + match + '</ul>';
+                })
+                .replace(/\n\n/g, '</p><p>')
+                .replace(/\n/g, '<br>');
+        }
+
+        function OpenChangelogModal() {
+            var isAdvancedView = settings['uiLevel'] && (parseInt(settings['uiLevel']) >= 1);
+            var modalTitle = isAdvancedView ? 'FPP Changelog (Git Commits)' : "What's New in FPP";
+
+            ShowLoadingModal('changelogModal', modalTitle, isAdvancedView ? 'modal-xl' : 'modal-lg');
+
+            fetchGitOriginLog(function(data) {
+                if (data === null) {
+                    $('#changelogModal .modal-body').html('<div class="alert alert-danger">Failed to load changelog</div>');
+                    return;
+                }
+
+                var html = '<div style="max-height: 70vh; overflow-y: auto;">';
+
+                if (isAdvancedView) {
+                    html += '<p class="alert alert-info"><i class="fas fa-info-circle"></i> This shows the git commit history for your current branch. Each entry represents a change to the FPP software.</p>';
+                    html += buildGitLogTableHtml(data, {
+                        showDate: true,
+                        commitWidth: '100px',
+                        emptyHtml: '<tr><td colspan="4" class="text-center">No changelog entries found</td></tr>'
+                    });
+                } else {
+                    // Standard view: Show actual GitHub release notes
+                    var updateCount = (data.rows && data.rows.length > 0) ? data.rows.length : 0;
+
+                    html += '<div class="fpp-changelog-summary">';
+
+                    if (updateCount > 0) {
+                        html += '<p class="fpp-changelog-summary__intro">';
+                        html += '<i class="fas fa-gift fpp-text-success fpp-icon-lead"></i>';
+                        html += '<strong>' + updateCount + ' update' + (updateCount > 1 ? 's' : '') + '</strong> ready to install';
+                        html += '</p>';
+                    }
+
+                    if (latestReleaseBody) {
+                        // Show actual release notes
+                        if (latestReleaseName) {
+                            html += '<h4 class="fpp-release-title"><i class="fas fa-tag fpp-text-info"></i> ' + latestReleaseName + '</h4>';
+                        }
+                        html += '<div class="fpp-release-notes">';
+                        html += '<p>' + markdownToHtml(latestReleaseBody) + '</p>';
+                        html += '</div>';
+                    } else if (updateCount > 0) {
+                        // Fallback if no release notes available
+                        html += '<div class="fpp-changelog-info">';
+                        html += '<p class="text-muted">Detailed release notes are not available for this update.</p>';
+                        html += '<p>Click the button below to view the full release history on GitHub.</p>';
+                        html += '</div>';
+                    } else {
+                        html += '<div class="text-center py-4">';
+                        html += '<i class="fas fa-check-circle fa-3x fpp-text-success"></i>';
+                        html += '<p class="mt-3">Your FPP software is up to date!</p>';
+                        html += '</div>';
+                    }
+
+                    html += '</div>';
+                }
+
                 html += '<div class="text-center mt-3">';
-                html += '<a href="https://github.com/FalconChristmas/fpp/commits" target="_blank" class="btn btn-outline-primary">';
-                html += '<i class="fas fa-external-link-alt"></i> View Full History on GitHub';
+                html += '<a href="' + latestReleaseUrl + '" target="_blank" class="btn btn-outline-primary">';
+                html += '<i class="fas fa-external-link-alt"></i> View Full Release on GitHub';
                 html += '</a>';
                 html += '</div>';
                 html += '</div>';
 
                 $('#changelogModal .modal-body').html(html);
-            }).fail(function () {
-                $('#changelogModal .modal-body').html('<div class="alert alert-danger">Failed to load changelog</div>');
-            });
-        }
-
-        function ViewOSReleaseNotes() {
-            var osVersion = $('#osSelect option:selected').text();
-
-            if (!osVersion || osVersion == '-- Choose an OS Version --') {
-                DialogError('No OS Selected', 'Please select an OS version first to view its release notes.');
-                return;
-            }
-
-            DoModalDialog({
-                id: 'osReleaseNotesModal',
-                title: 'OS Release Notes: ' + osVersion,
-                body: '<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Loading release notes...</div>',
-                class: 'modal-lg',
-                keyboard: true,
-                backdrop: true
-            });
-
-            // Extract version tag from OS filename (e.g., FPP-v9.0-Pi.img -> v9.0)
-            var versionMatch = osVersion.match(/v(\d+\.\d+(?:\.\d+)?(?:-[a-z]+\d*)?)/);
-            if (!versionMatch) {
-                $('#osReleaseNotesModal .modal-body').html('<div class="alert alert-warning">Could not determine version number from selected OS.</div>');
-                return;
-            }
-
-            var version = 'v' + versionMatch[1];
-
-            // Fetch release notes from GitHub API
-            $.ajax({
-                url: 'https://api.github.com/repos/FalconChristmas/fpp/releases/tags/' + version,
-                dataType: 'json',
-                success: function (release) {
-                    var html = '<div style="max-height: 70vh; overflow-y: auto;">';
-
-                    if (release.name) {
-                        html += '<h4>' + release.name + '</h4>';
-                    }
-
-                    if (release.published_at) {
-                        var date = new Date(release.published_at);
-                        html += '<p class="text-muted"><i class="fas fa-calendar"></i> Published: ' + date.toLocaleDateString() + '</p>';
-                    }
-
-                    if (release.body) {
-                        // Convert markdown to HTML (basic conversion)
-                        var body = release.body
-                            .replace(/#{3} (.+)/g, '<h5>$1</h5>')
-                            .replace(/#{2} (.+)/g, '<h4>$1</h4>')
-                            .replace(/# (.+)/g, '<h3>$1</h3>')
-                            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-                            .replace(/\*(.+?)\*/g, '<em>$1</em>')
-                            .replace(/^- (.+)/gm, '<li>$1</li>')
-                            .replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>')
-                            .replace(/\n\n/g, '</p><p>')
-                            .replace(/^(?!<[hul])/gm, '<p>')
-                            .replace(/(?<![>])$/gm, '</p>');
-
-                        html += '<div class="release-notes-body">' + body + '</div>';
-                    } else {
-                        html += '<p class="text-muted">No release notes available for this version.</p>';
-                    }
-
-                    html += '<div class="mt-3">';
-                    html += '<a href="' + release.html_url + '" target="_blank" class="btn btn-outline-primary">';
-                    html += '<i class="fas fa-external-link-alt"></i> View Full Release on GitHub';
-                    html += '</a>';
-                    html += '</div>';
-                    html += '</div>';
-
-                    $('#osReleaseNotesModal .modal-body').html(html);
-                },
-                error: function () {
-                    var html = '<div class="alert alert-warning">';
-                    html += '<i class="fas fa-info-circle"></i> Release notes not found for version ' + version + '.';
-                    html += '<br><br>This may be because:';
-                    html += '<ul><li>The version hasn\'t been officially released yet</li>';
-                    html += '<li>It\'s a development or beta build</li>';
-                    html += '<li>The release notes are not available on GitHub</li></ul>';
-                    html += '<a href="https://github.com/FalconChristmas/fpp/releases" target="_blank" class="btn btn-outline-primary mt-2">';
-                    html += '<i class="fas fa-external-link-alt"></i> Browse All Releases on GitHub';
-                    html += '</a>';
-                    html += '</div>';
-                    $('#osReleaseNotesModal .modal-body').html(html);
-                }
-            });
+            }, true); // force refresh for changelog
         }
 
         function GetGitOriginLog() {
-            DoModalDialog({
-                id: 'gitOriginLogModal',
-                title: 'Pending Git Changes',
-                body: '<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Loading changes...</div>',
-                class: 'modal-lg',
-                keyboard: true,
-                backdrop: true
-            });
+            ShowLoadingModal('gitOriginLogModal', 'Pending Git Changes');
 
-            $.get('api/git/originLog', function (data) {
-                var html = '<table class="table table-striped table-sm"><thead><tr><th width="80px">Commit</th><th width="150px">Author</th><th>Message</th></tr></thead><tbody>';
-                if (data.rows && data.rows.length > 0) {
-                    data.rows.forEach(function (row) {
-                        html += '<tr>';
-                        html += '<td><code>' + row.hash.substring(0, 8) + '</code></td>';
-                        html += '<td>' + row.author + '</td>';
-                        html += '<td>' + row.msg + '</td>';
-                        html += '</tr>';
-                    });
-                    html += '</tbody></table>';
-                } else {
-                    html += '<tr><td colspan="3" class="text-center">';
-                    html += '<div class="alert alert-info mb-0">';
-                    html += '<i class="fas fa-info-circle"></i> ';
-                    html += 'Unable to determine pending changes. This may occur when working with feature branches or forks. ';
-                    html += 'You can still update to get the latest changes using the "Update FPP Now" button.';
-                    html += '</div>';
-                    html += '</td></tr>';
-                    html += '</tbody></table>';
+            var emptyHtml = '<tr><td colspan="3" class="text-center">' +
+                '<div class="alert alert-info mb-0">' +
+                '<i class="fas fa-info-circle"></i> ' +
+                'Unable to determine pending changes. This may occur when working with feature branches or forks. ' +
+                'You can still update to get the latest changes using the "Update FPP Now" button.' +
+                '</div></td></tr>';
+
+            fetchGitOriginLog(function(data) {
+                if (data === null) {
+                    $('#gitOriginLogModal .modal-body').html('<div class="alert alert-danger">Failed to load git changes</div>');
+                    return;
                 }
+
+                var html = buildGitLogTableHtml(data, {
+                    showDate: false,
+                    emptyHtml: emptyHtml
+                });
+
                 $('#gitOriginLogModal .modal-body').html(html);
-            }).fail(function () {
-                $('#gitOriginLogModal .modal-body').html('<div class="alert alert-danger">Failed to load git changes</div>');
-            });
+            }, true); // force refresh
         }
 
         function UpdateVersionInfo() {
@@ -225,6 +374,13 @@
                     }
                     if (data.advancedView.OSVersion) {
                         $('#osVersionValue').text(data.advancedView.OSVersion);
+                        // OSVersion contains the build date (e.g., "v2025-11")
+                        currentOSRelease = data.advancedView.OSVersion;
+                        // Re-evaluate OS upgrade availability now that we know current version
+                        // (PopulateOSSelect may have already run)
+                        if ($('#osSelect option').length > 1) {
+                            osUpgradeAvailable = checkForNewerOS();
+                        }
                     }
                     if (data.advancedView.OSRelease) {
                         $('#osReleaseValue').text(data.advancedView.OSRelease);
@@ -241,75 +397,73 @@
                         $('#localGitShort').text(data.advancedView.LocalGitVersion);
                     }
 
+                    var isAdvancedView = settings['uiLevel'] && (parseInt(settings['uiLevel']) >= 1);
+
+                    if (isAdvancedView) {
+                        $('#fppVersionStandard').hide();
+                        $('#fppVersionAdvanced').show();
+                    } else {
+                        $('#fppVersionStandard').show();
+                        $('#fppVersionAdvanced').hide();
+                    }
+
                     if (remoteVer && remoteVer !== "Unknown" && remoteVer !== "" && remoteVer !== localVer) {
                         // Update available state
+                        fppUpdateAvailable = true;
                         $('#remoteGitShort').text(remoteVer);
                         $('#gitUpdateBadge').show();
-                        $('#fppVersionIndicator').show();
-                        $('#fppVersionCurrent').hide();
                         $('#fppUpdateBanner').show();
                         $('#fppVersionStatusBadge').removeClass('fpp-badge--neutral fpp-badge--success').addClass('fpp-badge--warning').text('Update Available');
 
+                        $('#fppVersionStandardUpdate').show();
+                        $('#fppVersionStandardCurrent').hide();
+
+                        $('#fppVersionIndicator').show();
+                        $('#fppVersionCurrent').hide();
+
                         // Fetch commit count from git origin log
-                        $.get('api/git/originLog', function (gitData) {
-                            if (gitData.rows && gitData.rows.length > 0) {
-                                $('#commitCount').text(gitData.rows.length);
+                        getGitCommitCount(function(count) {
+                            if (count > 0) {
+                                $('#commitCount').text(count);
+                                $('#commitCountStandard').text(count);
                             }
                         });
                     } else {
                         // Up to date state
+                        fppUpdateAvailable = false;
                         $('#gitUpdateBadge').hide();
-                        $('#fppVersionIndicator').hide();
-                        $('#fppVersionCurrent').show();
                         $('#fppUpdateBanner').hide();
                         $('#fppVersionStatusBadge').removeClass('fpp-badge--neutral fpp-badge--warning').addClass('fpp-badge--success').text('Up to Date');
+
+                        $('#fppVersionStandardUpdate').hide();
+                        $('#fppVersionStandardCurrent').show();
+
+                        $('#fppVersionIndicator').hide();
+                        $('#fppVersionCurrent').show();
                     }
 
-                    // Show OS version badge
                     $('#osVersionStatusBadge').show();
+
+                    checkUpgradeRecommendation();
                 }
+            }).fail(function () {
+                $('#fppVersionStatusBadge').removeClass('fpp-badge--neutral fpp-badge--success fpp-badge--warning').addClass('fpp-badge--neutral').text('Unknown');
             });
         }
 
         function UpgradeFPP() {
-            var options = {
-                id: "upgradePopupStatus",
-                title: "FPP Upgrade",
-                body: "<textarea style='max-width:100%; max-height:100%; width: 100%; height:100%;' disabled id='streamedUpgradeText'></textarea>",
-                class: "modal-dialog-scrollable",
-                noClose: true,
-                keyboard: false,
-                backdrop: "static",
-                footer: "",
-                buttons: {
-                    "Close": {
-                        id: 'fppUpgradeCloseDialogButton',
-                        click: function () {
-                            CloseFPPUpgradeDialog();
-                        },
-                        disabled: true,
-                        class: 'btn-success'
-                    }
-                }
-            };
-            $("#fppUpgradeCloseDialogButton").prop("disabled", true);
-            DoModalDialog(options);
-            StreamURL('manualUpdate.php?wrapped=1', 'streamedUpgradeText', 'FPPUpgradeDone');
+            DisplayProgressDialog('fppUpgrade', 'FPP Upgrade');
+            StreamURL('manualUpdate.php?wrapped=1', 'fppUpgradeText', 'FPPUpgradeDone');
         }
 
         function FPPUpgradeDone() {
-            $('#fppUpgradeCloseDialogButton').prop("disabled", false);
-            EnableModalDialogCloseButton("upgradePopupStatus");
+            $('#fppUpgradeCloseButton').prop("disabled", false);
+            EnableModalDialogCloseButton("fppUpgrade");
             UpdateVersionInfo();
         }
 
-        function CloseFPPUpgradeDialog() {
-            CloseModalDialog('upgradePopupStatus');
-            location.reload();
-        }
-
         function PopulateOSSelect() {
-            <? if ($freeSpace > 1000000000) { ?>
+            <?php if ($freeSpace > 1000000000) { ?>
 
                 var allPlatforms = '';
                 if ($('#allPlatforms').is(':checked')) {
@@ -383,9 +537,16 @@
                             }));
                         }
                     });
+
+                    osUpgradeAvailable = checkForNewerOS();
+                    checkUpgradeRecommendation();
+                }).fail(function () {
+                    // API failed - still show any locally downloaded OS files
+                    osUpgradeAvailable = checkForNewerOS();
+                    checkUpgradeRecommendation();
                 });
 
-            <? } ?>
+            <?php } ?>
         }
 
         function UpgradeOS() {
@@ -407,40 +568,22 @@
                 osName = $('#osSelect option:selected').text();
             }
 
+            var keepOptFPP = '';
+            if ($('#keepOptFPP').is(':checked')) {
+                keepOptFPP = '&keepOptFPP=1';
+            }
+
             if (confirm('Upgrade the OS using ' + osName +
                 '?\nThis can take a long time. It is also strongly recommended to run FPP backup first.')) {
 
-                var options = {
-                    id: "upgradeOSPopupStatus",
-                    title: "FPP OS Upgrade",
-                    body: "<textarea style='max-width:100%; max-height:100%; width: 100%; height:100%;' disabled id='streamedUpgradeOSText'></textarea>",
-                    class: "modal-dialog-scrollable",
-                    noClose: true,
-                    keyboard: false,
-                    backdrop: "static",
-                    footer: "",
-                    buttons: {
-                        "Close": {
-                            id: 'fppUpgradeOSCloseDialogButton',
-                            click: function () {
-                                CloseModalDialog("upgradeOSPopupStatus");
-                                location.reload();
-                            },
-                            disabled: true,
-                            class: 'btn-success'
-                        }
-                    }
-                };
-                $("#fppUpgradeOSCloseDialogButton").prop("disabled", true);
-                DoModalDialog(options);
-
-                StreamURL('upgradeOS.php?wrapped=1&os=' + os + keepOptFPP, 'streamedUpgradeOSText', 'UpgradeDone', 'UpgradeDone');
+                DisplayProgressDialog('osUpgrade', 'FPP OS Upgrade');
+                StreamURL('upgradeOS.php?wrapped=1&os=' + os + keepOptFPP, 'osUpgradeText', 'OSUpgradeDone', 'OSUpgradeDone');
             }
         }
 
-        function UpgradeDone() {
-            $("#fppUpgradeOSCloseDialogButton").prop("disabled", false);
-            EnableModalDialogCloseButton("upgradeOSPopupStatus");
+        function OSUpgradeDone() {
+            $("#osUpgradeCloseButton").prop("disabled", false);
+            EnableModalDialogCloseButton("osUpgrade");
             UpdateVersionInfo();
         }
 
@@ -455,39 +598,16 @@
                 osName = osAssetMap[os].name;
                 os = osAssetMap[os].url;
 
-                var options = {
-                    id: "downloadPopupStatus",
-                    title: "FPP Download OS Image",
-                    body: "<textarea style='max-width:100%; max-height:100%; width: 100%; height:100%;' disabled id='streamedUDownloadText'></textarea>",
-                    class: "modal-dialog-scrollable",
-                    noClose: true,
-                    keyboard: false,
-                    backdrop: "static",
-                    footer: "",
-                    buttons: {
-                        "Close": {
-                            id: 'fppDownloadCloseDialogButton',
-                            click: function () {
-                                CloseModalDialog("downloadPopupStatus");
-                                location.reload();
-                            },
-                            disabled: true,
-                            class: 'btn-success'
-                        }
-                    }
-                };
-                $("#fppDownloadCloseDialogButton").prop("disabled", true);
-                DoModalDialog(options);
-
-                StreamURL('upgradeOS.php?wrapped=1&downloadOnly=1&os=' + os, 'streamedUDownloadText', 'DownloadDone');
+                DisplayProgressDialog('osDownload', 'FPP Download OS Image');
+                StreamURL('upgradeOS.php?wrapped=1&downloadOnly=1&os=' + os, 'osDownloadText', 'OSDownloadDone');
             } else {
                 alert('This fppos image has already been downloaded.');
             }
         }
 
-        function DownloadDone() {
-            $("#fppDownloadCloseDialogButton").prop("disabled", false);
-            EnableModalDialogCloseButton("downloadPopupStatus");
+        function OSDownloadDone() {
+            $("#osDownloadCloseButton").prop("disabled", false);
+            EnableModalDialogCloseButton("osDownload");
             PopulateOSSelect();
         }
 
@@ -499,14 +619,7 @@
                 return;
             }
 
-            DoModalDialog({
-                id: 'osReleaseNotesModal',
-                title: 'OS Release Notes: ' + osVersion,
-                body: '<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Loading release notes...</div>',
-                class: 'modal-lg',
-                keyboard: true,
-                backdrop: true
-            });
+            ShowLoadingModal('osReleaseNotesModal', 'OS Release Notes: ' + osVersion);
 
             // Extract version tag from OS filename (e.g., BBB-9.3_2025-11.fppos -> 9.3)
             var versionMatch = osVersion.match(/(v?\d+\.\d+(?:\.\d+)?(?:-[a-z]+\d*)?)/i);
@@ -603,7 +716,7 @@
 
         function OSSelectChanged() {
             var os = $('#osSelect').val();
-            <?
+            <?php
             // we want at least a 200MB in order to be able to apply the fppos
             if ($freeSpace < 200000000) {
                 echo "os = '';\n";
@@ -672,7 +785,22 @@
                     </div>
                 </div>
 
-                <? if (!isset($settings['cape-info']) || !isset($settings['cape-info']['verifiedKeyId']) || ($settings['cape-info']['verifiedKeyId'] != 'fp')) { ?>
+                <!-- Upgrade Path Recommendation Banner (shown when both updates available) -->
+                <div id="upgradeRecommendationBanner" class="fpp-banner fpp-banner--info" style="display: none;">
+                    <div class="fpp-banner__icon">
+                        <i class="fas fa-lightbulb"></i>
+                    </div>
+                    <div class="fpp-banner__content">
+                        <div class="fpp-banner__title" id="upgradeRecommendationTitle">Recommended: Update FPP Software First</div>
+                        <p class="fpp-banner__message" id="upgradeRecommendationMessage">
+                            Both a software update and OS upgrade are available. We recommend updating
+                            FPP software first - it's quick (2-5 min) and may resolve any issues.
+                            Consider the OS upgrade after if needed.
+                        </p>
+                    </div>
+                </div>
+
+                <?php if (!isset($settings['cape-info']) || !isset($settings['cape-info']['verifiedKeyId']) || ($settings['cape-info']['verifiedKeyId'] != 'fp')) { ?>
                     <div id="donateBanner" class="fpp-donate-banner">
                         <h3 class="fpp-donate-banner__title">
                             <i class="fas fa-heart"></i> Support FPP Development
@@ -693,7 +821,7 @@
                             <i class="fas fa-coffee"></i> It takes a lot of time, equipment, and coffee to power your shows!
                         </p>
                     </div>
-                <? } ?>
+                <?php } ?>
 
                 <!-- Upgrade Options -->
                 <div class="row">
@@ -708,6 +836,7 @@
                                     <h3 class="fpp-card__title">
                                         Update FPP Software
                                         <span id="gitUpdateBadge" class="fpp-badge fpp-badge--success fpp-badge--sm" style="display: none;">Update Available</span>
+                                        <span id="fppRecommendedBadge" class="fpp-badge fpp-badge--info fpp-badge--sm" style="display: none;">Recommended</span>
                                     </h3>
                                     <p class="fpp-card__subtitle">Get the latest bug fixes and features. This is safe and quick.</p>
                                 </div>
@@ -728,29 +857,57 @@
                                 </div>
                             </div>
 
-                            <!-- Version upgrade indicator (update available) -->
-                            <div id="fppVersionIndicator" class="fpp-version-indicator fpp-version-indicator--clickable" style="display: none;" onclick="GetGitOriginLog();" title="Click to preview changes">
-                                <span class="fpp-version-indicator__from" id="localGitShort"><?= $localGitVersion ?></span>
-                                <i class="fas fa-arrow-right fpp-version-indicator__arrow"></i>
-                                <span class="fpp-version-indicator__to" id="remoteGitShort"></span>
-                                <span class="fpp-version-indicator__label"><i class="fas fa-search"></i> <span id="commitCount">0</span> changes behind</span>
+                            <!-- Standard View Version Indicators (uiLevel 0 - Basic) -->
+                            <div id="fppVersionStandard" class="fpp-version-standard-wrapper">
+                                <!-- Standard: Update available -->
+                                <div id="fppVersionStandardUpdate" class="fpp-version-indicator fpp-version-indicator--clickable" style="display: none;" onclick="OpenChangelogModal();" title="Click to see what's new">
+                                    <span class="fpp-version-indicator__current"><?= $fppVersionDisplay ?></span>
+                                    <i class="fas fa-arrow-right fpp-version-indicator__arrow"></i>
+                                    <span class="fpp-version-indicator__to" id="fppTargetVersion"><?= $latestReleaseVersion ? 'FPP ' . $latestReleaseVersion : 'Latest' ?></span>
+                                    <span class="fpp-badge fpp-badge--success fpp-badge--sm">Update Available</span>
+                                    <span class="fpp-version-indicator__label fpp-version-indicator__label--subtle"><span id="commitCountStandard"></span> updates - Click to see what's new</span>
+                                </div>
+
+                                <!-- Standard: Up to date -->
+                                <div id="fppVersionStandardCurrent" class="fpp-version-indicator fpp-version-indicator--current" style="display: none;">
+                                    <i class="fas fa-check-circle"></i>
+                                    <span class="fpp-version-indicator__current"><?= $fppVersionDisplay ?></span>
+                                    <span class="fpp-version-indicator__label">You're up to date!</span>
+                                </div>
                             </div>
 
-                            <!-- Version indicator (up to date) -->
-                            <div id="fppVersionCurrent" class="fpp-version-indicator fpp-version-indicator--current" style="display: none;">
-                                <i class="fas fa-check-circle"></i>
-                                <span class="fpp-version-indicator__current" id="localGitValue"><?= $localGitVersion ?></span>
-                                <span class="fpp-version-indicator__label">You're up to date!</span>
+                            <!-- Advanced View Version Indicators (uiLevel >= 1 - Advanced) -->
+                            <div id="fppVersionAdvanced" class="fpp-version-advanced-wrapper" style="display: none;">
+                                <!-- Advanced: Update available (git hashes) -->
+                                <div id="fppVersionIndicator" class="fpp-version-indicator fpp-version-indicator--clickable" style="display: none;" onclick="GetGitOriginLog();" title="Click to preview changes">
+                                    <span class="fpp-version-indicator__from" id="localGitShort"><?= $localGitVersion ?></span>
+                                    <i class="fas fa-arrow-right fpp-version-indicator__arrow"></i>
+                                    <span class="fpp-version-indicator__to" id="remoteGitShort"></span>
+                                    <span class="fpp-version-indicator__label"><i class="fas fa-search"></i> <span id="commitCount">0</span> changes behind</span>
+                                </div>
+
+                                <!-- Advanced: Up to date -->
+                                <div id="fppVersionCurrent" class="fpp-version-indicator fpp-version-indicator--current" style="display: none;">
+                                    <i class="fas fa-check-circle"></i>
+                                    <span class="fpp-version-indicator__current" id="localGitValue"><?= $localGitVersion ?></span>
+                                    <span class="fpp-version-indicator__label">You're up to date!</span>
+                                </div>
                             </div>
 
                             <div class="fpp-card__actions">
                                 <button class="fpp-btn fpp-btn--success" onclick="UpgradeFPP();">
                                     <i class="fas fa-download"></i> Update FPP Now
                                 </button>
-                                <button class="fpp-btn fpp-btn--outline" onclick="OpenChangelogModal();">
-                                    <i class="fas fa-list"></i> View Changelog
-                                </button>
-                                <?
+                                <?php if (isset($settings['uiLevel']) && $settings['uiLevel'] >= 1) { ?>
+                                    <button class="fpp-btn fpp-btn--outline" onclick="OpenChangelogModal();">
+                                        <i class="fas fa-list"></i> View Changelog
+                                    </button>
+                                <?php } else { ?>
+                                    <button class="fpp-btn fpp-btn--outline" onclick="OpenChangelogModal();">
+                                        <i class="fas fa-gift"></i> What's New
+                                    </button>
+                                <?php } ?>
+                                <?php
                                 if ($settings['uiLevel'] > 0) {
                                     $upgradeSources = array();
                                     $remotes = getKnownFPPSystems();
@@ -778,9 +935,9 @@
                                     <div class="fpp-advanced-options">
                                         <span class="fpp-badge fpp-badge--info">Adv</span>
                                         <span>Source:</span>
-                                        <? PrintSettingSelect("FPP Upgrade Source", "UpgradeSource", 0, 0, "github.com", $upgradeSources); ?>
+                                        <?php PrintSettingSelect("FPP Upgrade Source", "UpgradeSource", 0, 0, "github.com", $upgradeSources); ?>
                                     </div>
-                                <? } ?>
+                                <?php } ?>
                             </div>
                         </div>
                     </div>
@@ -793,7 +950,10 @@
                                     <i class="fas fa-hdd"></i>
                                 </div>
                                 <div>
-                                    <h3 class="fpp-card__title">Upgrade Operating System</h3>
+                                    <h3 class="fpp-card__title">
+                                        Upgrade Operating System
+                                        <span id="osRecommendedBadge" class="fpp-badge fpp-badge--info fpp-badge--sm" style="display: none;">Recommended</span>
+                                    </h3>
                                     <p class="fpp-card__subtitle">Upgrade the entire FPP operating system with a new version</p>
                                 </div>
                             </div>
@@ -842,7 +1002,7 @@
                                 </button>
                             </div>
 
-                            <? if (isset($settings['uiLevel']) && $settings['uiLevel'] >= 1) { ?>
+                            <?php if (isset($settings['uiLevel']) && $settings['uiLevel'] >= 1) { ?>
                             <div class="fpp-checkbox-options">
                                 <label class="fpp-checkbox-option">
                                     <input type="checkbox" id="allPlatforms" onChange="PopulateOSSelect();">
@@ -856,23 +1016,23 @@
                                     Show Legacy OS
                                     <img title='Include historic OS releases in listing' src='images/redesign/help-icon.svg' class='icon-help'>
                                 </label>
-                                <? if (isset($settings['uiLevel']) && $settings['uiLevel'] >= 3) { ?>
+                                <?php if (isset($settings['uiLevel']) && $settings['uiLevel'] >= 3) { ?>
                                 <label class="fpp-checkbox-option fpp-checkbox-option--dev">
                                     <input type="checkbox" id="keepOptFPP">
                                     <span class="fpp-badge fpp-badge--dev">Dev</span>
                                     Keep /opt/fpp
                                     <img title='WARNING: This will upgrade the OS but will not upgrade the FPP version running in /opt/fpp. This is useful for developers who are developing the code in /opt/fpp and just want the underlying OS upgraded.' src='images/redesign/help-icon.svg' class='icon-help'>
                                 </label>
-                                <? } ?>
+                                <?php } ?>
                             </div>
-                            <? } ?>
+                            <?php } ?>
                         </div>
                     </div>
                 </div>
 
 
 
-                <? if (isset($settings['uiLevel']) && $settings['uiLevel'] >= 1) { ?>
+                <?php if (isset($settings['uiLevel']) && $settings['uiLevel'] >= 1) { ?>
                     <!-- Revert to Previous Commit Card -->
                     <div class="fpp-card fpp-card--accent fpp-card--accent-neutral fpp-card--compact fpp-card--inline">
                         <div class="fpp-card__content">
@@ -934,12 +1094,12 @@
                             </div>
 
                             <div class="col-md-4">
-                                <? if (isset($serialNumber) && $serialNumber != "") { ?>
+                                <?php if (isset($serialNumber) && $serialNumber != "") { ?>
                                     <div class="fpp-row">
                                         <span class="fpp-row__label">Serial Number:</span>
                                         <span class="fpp-row__value"><?= $serialNumber ?></span>
                                     </div>
-                                <? } ?>
+                                <?php } ?>
                                 <div class="fpp-row">
                                     <span class="fpp-row__label">Kernel:</span>
                                     <span class="fpp-row__value" id="kernelValue">--</span>
@@ -947,7 +1107,7 @@
                             </div>
                         </div>
                     </div>
-                <? } ?>
+                <?php } ?>
 
                 <!-- Comparison & FAQ Section - Side by Side -->
                 <div class="fpp-info-section">
@@ -1089,7 +1249,7 @@
                         <li><i class="fas fa-code-branch"></i> <a href="https://github.com/FalconChristmas/fpp" target="_blank">GitHub Repository</a></li>
                         <li><i class="fas fa-book"></i> <a href="https://github.com/FalconChristmas/fpp/blob/master/README.md" target="_blank">Documentation</a></li>
                         <li><i class="fas fa-users"></i> <a href="https://www.facebook.com/groups/falconplayer" target="_blank">Facebook Group</a></li>
-                        <li><i class="fas fa-comments"></i> <a href="http://forums.falconchristmas.com" target="_blank">Forums</a></li>
+                        <li><i class="fas fa-comments"></i> <a href="http://www.falconchristmas.com/forum" target="_blank">Forums</a></li>
                         <li><i class="fas fa-bug"></i> <a href="https://github.com/FalconChristmas/fpp/issues" target="_blank">Report Issues</a></li>
                         <li><i class="fas fa-heart"></i> <a href="system-stats.php">System Health</a></li>
                     </ul>
