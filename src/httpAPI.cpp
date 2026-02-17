@@ -53,6 +53,7 @@
 #include "channeloutput/ChannelOutputSetup.h"
 #include "channeltester/ChannelTester.h"
 #include "commands/Commands.h"
+#include "mediaoutput/AES67Manager.h"
 #include "mediaoutput/MediaOutputBase.h"
 #include "mediaoutput/MediaOutputStatus.h"
 #include "mediaoutput/mediaoutput.h"
@@ -295,6 +296,10 @@ void APIServer::Init(void) {
     m_ws->register_resource("/commandPresets", &CommandManager::INSTANCE, true);
     m_ws->register_resource("/gpio", &GPIOManager::INSTANCE, true);
     m_ws->register_resource("/player", &Player::INSTANCE, true);
+
+#ifdef HAS_AES67_GSTREAMER
+    m_ws->register_resource("/aes67", &AES67Manager::INSTANCE, true);
+#endif
 
     PluginManager::INSTANCE.registerApis(m_ws);
 
