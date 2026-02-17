@@ -79,6 +79,7 @@
 #include "channeloutput/channeloutputthread.h"
 #include "channeltester/ChannelTester.h"
 #include "commands/Commands.h"
+#include "mediaoutput/AES67Manager.h"
 #include "mediaoutput/MediaOutputBase.h"
 #include "mediaoutput/MediaOutputStatus.h"
 #include "mediaoutput/mediaoutput.h"
@@ -786,6 +787,10 @@ int main(int argc, char* argv[]) {
     PluginManager::INSTANCE.init();
 
     InitMediaOutput();
+#ifdef HAS_AES67_GSTREAMER
+    AES67Manager::INSTANCE.Init();
+    AES67Manager::INSTANCE.ApplyConfig();
+#endif
     PixelOverlayManager::INSTANCE.Initialize();
     PingManager::INSTANCE.Initialize();
     InitializeChannelOutputs();
@@ -810,6 +815,9 @@ int main(int argc, char* argv[]) {
     // events while we are shutting down
     Events::PrepareForShutdown();
 
+#ifdef HAS_AES67_GSTREAMER
+    AES67Manager::INSTANCE.Shutdown();
+#endif
     CleanupMediaOutput();
     CloseEffects();
     CloseChannelOutputs();
