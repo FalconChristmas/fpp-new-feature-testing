@@ -513,7 +513,11 @@ case "${OSVER}" in
                       fonts-freefont-ttf flex bison pkg-config libasound2-dev mesa-common-dev qrencode libusb-1.0-0-dev \
                       flex bison pkg-config libasound2-dev python3-setuptools libssl-dev libtool bsdextrautils iw rsyslog tzdata libsystemd-dev \
                       pipewire pipewire-bin pipewire-alsa pipewire-pulse pipewire-jack pipewire-audio-client-libraries wireplumber \
-                      libpipewire-0.3-dev libspa-0.2-bluetooth pulseaudio-utils linuxptp"
+                      libpipewire-0.3-dev libspa-0.2-bluetooth pulseaudio-utils linuxptp \
+                      gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+                      gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-pipewire \
+                      gstreamer1.0-libav gstreamer1.0-gl gstreamer1.0-x \
+                      libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libgstreamer-plugins-bad1.0-0"
 
         if [ "$FPPPLATFORM" == "Raspberry Pi" -o "$FPPPLATFORM" == "BeagleBone Black"  -o "$FPPPLATFORM" == "BeagleBone 64" ]; then
             PACKAGE_LIST="$PACKAGE_LIST firmware-realtek firmware-atheros firmware-ralink firmware-brcm80211 firmware-iwlwifi firmware-libertas firmware-zd1211 firmware-ti-connectivity zram-tools"
