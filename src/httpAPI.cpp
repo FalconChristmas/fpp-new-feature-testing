@@ -56,6 +56,7 @@
 #include "mediaoutput/AES67Manager.h"
 #include "mediaoutput/MediaOutputBase.h"
 #include "mediaoutput/MediaOutputStatus.h"
+#include "mediaoutput/StreamSlotManager.h"
 #include "mediaoutput/mediaoutput.h"
 #include "overlays/PixelOverlay.h"
 #include "playlist/Playlist.h"
@@ -235,6 +236,9 @@ void GetCurrentFPPDStatus(Json::Value& result) {
 
         Player::INSTANCE.GetCurrentStatus(result);
         result["scheduler"] = scheduler->GetInfo();
+
+        // Add multi-stream slot status
+        result["streamSlots"] = StreamSlotManager::Instance().GetAllSlotsStatus();
     }
 }
 
