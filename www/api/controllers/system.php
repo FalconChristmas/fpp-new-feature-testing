@@ -125,6 +125,100 @@ function ViewReleaseNotes()
     }
 }
 
+// GET /api/system/updateStatus
+function GetUpdateStatus()
+{
+    // Test mode: simulate different upgrade scenarios
+    // Usage: api/system/updateStatus?test=branch (or commit, both, uptodate)
+    // This allows testing the upgrade UI without being on an actual old version
+    if (isset($_GET['test'])) {
+        $test = $_GET['test'];
+        $localCommit = get_local_git_version();
+
+        if ($test === 'branch') {
+            // Simulate: on v9.4, v9.5 available
+            return json(array(
+                "status" => "OK",
+                "branchUpgradeAvailable" => true,
+                "branchUpgradeTarget" => "v9.5",
+                "branchUpgradeVersion" => "9.5",
+                "commitUpdateAvailable" => false,
+                "remoteCommit" => "",
+                "currentBranch" => "v9.4",
+                "localCommit" => $localCommit
+            ));
+        } else if ($test === 'commit') {
+            // Simulate: on current branch, commits behind
+            return json(array(
+                "status" => "OK",
+                "branchUpgradeAvailable" => false,
+                "branchUpgradeTarget" => "",
+                "branchUpgradeVersion" => "",
+                "commitUpdateAvailable" => true,
+                "remoteCommit" => "def456789",
+                "currentBranch" => getFPPBranch(),
+                "localCommit" => $localCommit
+            ));
+        } else if ($test === 'both') {
+            // Simulate: branch upgrade AND commits behind
+            return json(array(
+                "status" => "OK",
+                "branchUpgradeAvailable" => true,
+                "branchUpgradeTarget" => "v9.5",
+                "branchUpgradeVersion" => "9.5",
+                "commitUpdateAvailable" => true,
+                "remoteCommit" => "def456789",
+                "currentBranch" => "v9.4",
+                "localCommit" => $localCommit
+            ));
+        } else if ($test === 'uptodate') {
+            // Simulate: everything up to date
+            return json(array(
+                "status" => "OK",
+                "branchUpgradeAvailable" => false,
+                "branchUpgradeTarget" => "",
+                "branchUpgradeVersion" => "",
+                "commitUpdateAvailable" => false,
+                "remoteCommit" => $localCommit,
+                "currentBranch" => getFPPBranch(),
+                "localCommit" => $localCommit
+            ));
+        }
+    }
+
+    // Get the latest release version from GitHub (cached)
+    $latestReleaseVersion = file_cache('github_latest_release', function () {
+        $ch = curl_init('https://api.github.com/repos/FalconChristmas/fpp/releases/latest');
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_USERAGENT, 'FPP');
+        curl_setopt($ch, CURLOPT_TIMEOUT, 5);
+        $response = curl_exec($ch);
+        curl_close($ch);
+
+        if ($response) {
+            $releaseData = json_decode($response, true);
+            if (isset($releaseData['tag_name'])) {
+                return $releaseData['tag_name'];
+            }
+        }
+        return '';
+    }, 300, 60);
+
+    // Get unified update status
+    $updateStatus = check_fppstats_updates($latestReleaseVersion);
+
+    return json(array(
+        "status" => "OK",
+        "branchUpgradeAvailable" => $updateStatus['branchUpgradeAvailable'],
+        "branchUpgradeTarget" => $updateStatus['branchUpgradeTarget'],
+        "branchUpgradeVersion" => $updateStatus['branchUpgradeVersion'],
+        "commitUpdateAvailable" => $updateStatus['commitUpdateAvailable'],
+        "remoteCommit" => $updateStatus['remoteCommit'],
+        "currentBranch" => $updateStatus['currentBranch'],
+        "localCommit" => $updateStatus['localCommit']
+    ));
+}
+
 // PUT /system/volume
 function SystemSetAudio()
 {

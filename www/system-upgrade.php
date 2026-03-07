@@ -98,7 +98,7 @@
                     var availableVersion = parseOSVersion(this.text);
                     if (isNewerOSVersion(availableVersion, currentVersion)) {
                         hasNewerOS = true;
-                        return false; // break out of each()
+                        return false;
                     }
                 }
             });
@@ -111,8 +111,6 @@
 
         /**
          * Fetch git origin log with caching
-         * @param {function} callback - Called with data object or null on failure
-         * @param {boolean} forceRefresh - If true, bypasses cache
          */
         function fetchGitOriginLog(callback, forceRefresh) {
             if (!forceRefresh && gitOriginLogCache !== null) {
@@ -351,7 +349,11 @@
             }, true); // force refresh
         }
 
-        function UpdateVersionInfo() {
+        // Track what type of update is available
+        var branchUpgradeData = null;
+
+        function UpdateVersionInfo(testMode) {
+            // Fetch system status for version info
             $.get('api/system/status', function (data) {
                 if (data.advancedView) {
                     if (data.advancedView.Version) {
@@ -374,10 +376,7 @@
                     }
                     if (data.advancedView.OSVersion) {
                         $('#osVersionValue').text(data.advancedView.OSVersion);
-                        // OSVersion contains the build date (e.g., "v2025-11")
                         currentOSRelease = data.advancedView.OSVersion;
-                        // Re-evaluate OS upgrade availability now that we know current version
-                        // (PopulateOSSelect may have already run)
                         if ($('#osSelect option').length > 1) {
                             osUpgradeAvailable = checkForNewerOS();
                         }
@@ -389,66 +388,126 @@
                         $('#kernelValue').text(data.advancedView.Kernel);
                     }
 
-                    var localVer = data.advancedView.LocalGitVersion;
-                    var remoteVer = data.advancedView.RemoteGitVersion;
-
                     if (data.advancedView.LocalGitVersion) {
                         $('#localGitValue').text(data.advancedView.LocalGitVersion);
                         $('#localGitShort').text(data.advancedView.LocalGitVersion);
                     }
 
-                    var isAdvancedView = settings['uiLevel'] && (parseInt(settings['uiLevel']) >= 1);
-
-                    if (isAdvancedView) {
-                        $('#fppVersionStandard').hide();
-                        $('#fppVersionAdvanced').show();
-                    } else {
-                        $('#fppVersionStandard').show();
-                        $('#fppVersionAdvanced').hide();
-                    }
-
-                    if (remoteVer && remoteVer !== "Unknown" && remoteVer !== "" && remoteVer !== localVer) {
-                        // Update available state
-                        fppUpdateAvailable = true;
-                        $('#remoteGitShort').text(remoteVer);
-                        $('#gitUpdateBadge').show();
-                        $('#fppUpdateBanner').show();
-                        $('#fppVersionStatusBadge').removeClass('fpp-badge--neutral fpp-badge--success').addClass('fpp-badge--warning').text('Update Available');
-
-                        $('#fppVersionStandardUpdate').show();
-                        $('#fppVersionStandardCurrent').hide();
-
-                        $('#fppVersionIndicator').show();
-                        $('#fppVersionCurrent').hide();
-
-                        // Fetch commit count from git origin log
-                        getGitCommitCount(function(count) {
-                            if (count > 0) {
-                                $('#commitCount').text(count);
-                                $('#commitCountStandard').text(count);
-                            }
-                        });
-                    } else {
-                        // Up to date state
-                        fppUpdateAvailable = false;
-                        $('#gitUpdateBadge').hide();
-                        $('#fppUpdateBanner').hide();
-                        $('#fppVersionStatusBadge').removeClass('fpp-badge--neutral fpp-badge--warning').addClass('fpp-badge--success').text('Up to Date');
-
-                        $('#fppVersionStandardUpdate').hide();
-                        $('#fppVersionStandardCurrent').show();
-
-                        $('#fppVersionIndicator').hide();
-                        $('#fppVersionCurrent').show();
-                    }
-
                     $('#osVersionStatusBadge').show();
-
-                    checkUpgradeRecommendation();
                 }
+            });
+
+            // Fetch unified update status
+            var updateStatusUrl = 'api/system/updateStatus';
+            if (testMode) {
+                updateStatusUrl += '?test=' + testMode;
+            }
+            $.get(updateStatusUrl, function (updateData) {
+                if (updateData.status !== 'OK') return;
+
+                var isAdvancedView = settings['uiLevel'] && (parseInt(settings['uiLevel']) >= 1);
+
+                if (isAdvancedView) {
+                    $('#fppVersionStandard').hide();
+                    $('#fppVersionAdvanced').show();
+                } else {
+                    $('#fppVersionStandard').show();
+                    $('#fppVersionAdvanced').hide();
+                }
+
+                // Hide all standard view states
+                $('#fppVersionStandardBranchUpgrade, #fppVersionStandardCommitUpdate, #fppVersionStandardCurrent').hide();
+
+                if (updateData.branchUpgradeAvailable) {
+                    // Branch upgrade available - takes priority
+                    branchUpgradeData = updateData;
+                    fppUpdateAvailable = true;
+
+                    $('#gitUpdateBadge').text('Upgrade to ' + updateData.branchUpgradeTarget).show();
+                    $('#fppUpdateBanner').show();
+                    $('#fppVersionStatusBadge').removeClass('fpp-badge--neutral fpp-badge--success').addClass('fpp-badge--warning').text('Upgrade Available');
+
+                    // Standard view: show branch upgrade
+                    $('#fppVersionStandardBranchUpgrade').show();
+                    $('#fppTargetVersion').text('FPP ' + updateData.branchUpgradeVersion);
+
+                    // Advanced view
+                    $('#fppVersionIndicator').show();
+                    $('#fppVersionCurrent').hide();
+                    $('#remoteGitShort').text(updateData.branchUpgradeTarget);
+                    $('#commitCount').parent().hide();
+
+                    // Update button text for branch upgrade
+                    $('#fppUpdateButtonText').text('Upgrade to ' + updateData.branchUpgradeTarget);
+                    $('#fppWhatsNewButtonText').text('Release Notes');
+                    $('#fppWhatsNewButton').show();
+
+                } else if (updateData.commitUpdateAvailable) {
+                    // Commit update available (same version, new commits)
+                    branchUpgradeData = null;
+                    fppUpdateAvailable = true;
+
+                    $('#remoteGitShort').text(updateData.remoteCommit.substring(0, 9));
+                    $('#gitUpdateBadge').text('Update Available').show();
+                    $('#fppUpdateBanner').show();
+                    $('#fppVersionStatusBadge').removeClass('fpp-badge--neutral fpp-badge--success').addClass('fpp-badge--warning').text('Update Available');
+
+                    // Standard view: show commit update (no version arrow)
+                    $('#fppVersionStandardCommitUpdate').show();
+
+                    // Advanced view
+                    $('#fppVersionIndicator').show();
+                    $('#fppVersionCurrent').hide();
+                    $('#commitCount').parent().show();
+
+                    // Fetch commit count
+                    getGitCommitCount(function(count) {
+                        if (count > 0) {
+                            $('#commitCount').text(count);
+                            $('#commitCountStandard').text(count);
+                        }
+                    });
+
+                    // Button text for commit update
+                    $('#fppUpdateButtonText').text('Update FPP Now');
+                    $('#fppWhatsNewButtonText').text("What's New");
+                    $('#fppWhatsNewButton').show();
+
+                } else {
+                    // Up to date
+                    branchUpgradeData = null;
+                    fppUpdateAvailable = false;
+
+                    $('#gitUpdateBadge').hide();
+                    $('#fppUpdateBanner').hide();
+                    $('#fppVersionStatusBadge').removeClass('fpp-badge--neutral fpp-badge--warning').addClass('fpp-badge--success').text('Up to Date');
+
+                    // Standard view
+                    $('#fppVersionStandardCurrent').show();
+
+                    // Advanced view
+                    $('#fppVersionIndicator').hide();
+                    $('#fppVersionCurrent').show();
+
+                    // Hide update-related buttons when up to date
+                    $('#fppWhatsNewButton').hide();
+                }
+
+                checkUpgradeRecommendation();
             }).fail(function () {
                 $('#fppVersionStatusBadge').removeClass('fpp-badge--neutral fpp-badge--success fpp-badge--warning').addClass('fpp-badge--neutral').text('Unknown');
             });
+        }
+
+        // Handle FPP update button click - route to appropriate action
+        function HandleFPPUpdate() {
+            if (branchUpgradeData && branchUpgradeData.branchUpgradeAvailable) {
+                // Branch upgrade: show release notes modal with upgrade button
+                ViewReleaseNotes(branchUpgradeData.branchUpgradeVersion);
+            } else {
+                // Commit update: direct update
+                UpgradeFPP();
+            }
         }
 
         function UpgradeFPP() {
@@ -746,10 +805,17 @@
             });
         }
 
+        // Test mode support: append ?test=branch (or commit, both, uptodate)
+        var upgradeTestMode = new URLSearchParams(window.location.search).get('test');
+
         $(document).ready(function () {
-            UpdateVersionInfo();
+            UpdateVersionInfo(upgradeTestMode);
             PopulateOSSelect();
             initFaqAccordion();
+
+            if (upgradeTestMode) {
+                console.log('Upgrade test mode: ' + upgradeTestMode);
+            }
         });
     </script>
 </head>
@@ -859,13 +925,20 @@
 
                             <!-- Standard View Version Indicators (uiLevel 0 - Basic) -->
                             <div id="fppVersionStandard" class="fpp-version-standard-wrapper">
-                                <!-- Standard: Update available -->
-                                <div id="fppVersionStandardUpdate" class="fpp-version-indicator fpp-version-indicator--clickable" style="display: none;" onclick="OpenChangelogModal();" title="Click to see what's new">
+                                <!-- Standard: Branch upgrade available (e.g., v9.4 → v9.5) -->
+                                <div id="fppVersionStandardBranchUpgrade" class="fpp-version-indicator fpp-version-indicator--clickable" style="display: none;" onclick="HandleFPPUpdate();" title="Click to see release notes">
                                     <span class="fpp-version-indicator__current"><?= $fppVersionDisplay ?></span>
                                     <i class="fas fa-arrow-right fpp-version-indicator__arrow"></i>
                                     <span class="fpp-version-indicator__to" id="fppTargetVersion"><?= $latestReleaseVersion ? 'FPP ' . $latestReleaseVersion : 'Latest' ?></span>
+                                    <span class="fpp-badge fpp-badge--warning fpp-badge--sm">Upgrade Available</span>
+                                    <span class="fpp-version-indicator__label fpp-version-indicator__label--subtle">Click to see release notes</span>
+                                </div>
+
+                                <!-- Standard: Commit updates available (same version, new commits) -->
+                                <div id="fppVersionStandardCommitUpdate" class="fpp-version-indicator" style="display: none;">
+                                    <span class="fpp-version-indicator__current"><?= $fppVersionDisplay ?></span>
                                     <span class="fpp-badge fpp-badge--success fpp-badge--sm">Update Available</span>
-                                    <span class="fpp-version-indicator__label fpp-version-indicator__label--subtle"><span id="commitCountStandard"></span> updates - Click to see what's new</span>
+                                    <span class="fpp-version-indicator__label fpp-version-indicator__label--subtle"><span id="commitCountStandard"></span> updates ready to install</span>
                                 </div>
 
                                 <!-- Standard: Up to date -->
@@ -895,16 +968,16 @@
                             </div>
 
                             <div class="fpp-card__actions">
-                                <button class="fpp-btn fpp-btn--success" onclick="UpgradeFPP();">
-                                    <i class="fas fa-download"></i> Update FPP Now
+                                <button class="fpp-btn fpp-btn--success" id="fppUpdateButton" onclick="HandleFPPUpdate();">
+                                    <i class="fas fa-download"></i> <span id="fppUpdateButtonText">Update FPP Now</span>
                                 </button>
                                 <?php if (isset($settings['uiLevel']) && $settings['uiLevel'] >= 1) { ?>
-                                    <button class="fpp-btn fpp-btn--outline" onclick="OpenChangelogModal();">
-                                        <i class="fas fa-list"></i> View Changelog
+                                    <button class="fpp-btn fpp-btn--outline" id="fppWhatsNewButton" onclick="OpenChangelogModal();">
+                                        <i class="fas fa-list"></i> <span id="fppWhatsNewButtonText">View Changelog</span>
                                     </button>
                                 <?php } else { ?>
-                                    <button class="fpp-btn fpp-btn--outline" onclick="OpenChangelogModal();">
-                                        <i class="fas fa-gift"></i> What's New
+                                    <button class="fpp-btn fpp-btn--outline" id="fppWhatsNewButton" onclick="OpenChangelogModal();">
+                                        <i class="fas fa-gift"></i> <span id="fppWhatsNewButtonText">What's New</span>
                                     </button>
                                 <?php } ?>
                                 <?php
@@ -1030,8 +1103,6 @@
                     </div>
                 </div>
 
-
-
                 <?php if (isset($settings['uiLevel']) && $settings['uiLevel'] >= 1) { ?>
                     <!-- Revert to Previous Commit Card -->
                     <div class="fpp-card fpp-card--accent fpp-card--accent-neutral fpp-card--compact fpp-card--inline">
@@ -1142,6 +1213,11 @@
                                     <td>Media Files</td>
                                     <td class="fpp-text-success"><i class="fas fa-check"></i> Kept</td>
                                     <td class="fpp-text-success"><i class="fas fa-check"></i> Kept</td>
+                                </tr>
+                                <tr>
+                                    <td>Plugins</td>
+                                    <td class="fpp-text-success"><i class="fas fa-check"></i> Kept</td>
+                                    <td class="fpp-text-warning"><i class="fas fa-exclamation"></i> Reinstall*</td>
                                 </tr>
                                 <tr>
                                     <td>Risk Level</td>

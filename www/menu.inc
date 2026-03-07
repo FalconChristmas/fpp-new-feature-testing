@@ -238,9 +238,30 @@ function list_plugin_entries($menu)
                 <?
             }
             ?>
-            <!--
-  <div id='upgradeFlag' class="alert detract"><span class='inlineBlock'>FPP v7.1 is available for install</span><span class='inlineBlock'><button name="btnUpgrade" type="button" onClick="ViewReleaseNotes('7.1');"  class = "buttons btn-outline-light" ><i class='fas fa-fw fa-sync fa-nbsp'></i>Upgrade FPP</button></span></div>
--->
+            <div id='upgradeFlag' class="alert detract" style="display: none;">
+                <span class='inlineBlock' id='upgradeFlagText'>FPP update available</span>
+                <span class='inlineBlock'>
+                    <button name="btnUpgrade" type="button" id='upgradeFlagButton' class="buttons btn-outline-light">
+                        <i class='fas fa-fw fa-sync fa-nbsp'></i><span id='upgradeFlagButtonText'>Upgrade FPP</span>
+                    </button>
+                </span>
+            </div>
+            <script>
+            $(document).on('fpp:updateStatusChanged', function(e, state) {
+                if (state.branchUpgradeAvailable) {
+                    // Branch upgrade available - show banner with release notes link
+                    $('#upgradeFlagText').text('FPP ' + state.branchUpgradeTarget + ' is available for install');
+                    $('#upgradeFlagButtonText').text('Upgrade to ' + state.branchUpgradeTarget);
+                    $('#upgradeFlagButton').off('click').on('click', function() {
+                        ViewReleaseNotes(state.branchUpgradeVersion);
+                    });
+                    $('#upgradeFlag').show();
+                } else {
+                    // No branch upgrade - hide banner
+                    $('#upgradeFlag').hide();
+                }
+            });
+            </script>
             <div id='restartFlag' class="alert detract"><span class='inlineBlock'>Settings have changed. FPPD Restart
                     Required</span><span class='inlineBlock'><button name="btnRestartFPPD" type="button"
                         onClick="RestartFPPD();common_ViewPortChange();" class="buttons btn-outline-light"><i
