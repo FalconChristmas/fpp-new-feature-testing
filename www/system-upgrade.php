@@ -439,8 +439,6 @@
 
                     // Update button text for branch upgrade
                     $('#fppUpdateButtonText').text('Upgrade to ' + updateData.branchUpgradeTarget);
-                    $('#fppWhatsNewButtonText').text('Release Notes');
-                    $('#fppWhatsNewButton').show();
 
                 } else if (updateData.commitUpdateAvailable) {
                     // Commit update available (same version, new commits)
@@ -470,8 +468,6 @@
 
                     // Button text for commit update
                     $('#fppUpdateButtonText').text('Update FPP Now');
-                    $('#fppWhatsNewButtonText').text("What's New");
-                    $('#fppWhatsNewButton').show();
 
                 } else {
                     // Up to date
@@ -488,9 +484,6 @@
                     // Advanced view
                     $('#fppVersionIndicator').hide();
                     $('#fppVersionCurrent').show();
-
-                    // Hide update-related buttons when up to date
-                    $('#fppWhatsNewButton').hide();
                 }
 
                 checkUpgradeRecommendation();
@@ -758,14 +751,14 @@
                     $('#osReleaseNotesModal .modal-body').html(html);
                 },
                 error: function () {
-                    var html = '<div class=\"alert alert-warning\">';
-                    html += '<i class=\"fas fa-info-circle\"></i> Release notes not found for version ' + version + '.';
-                    html += '<br><br>This may be because:';
-                    html += '<ul><li>The version hasn\'t been officially released yet</li>';
-                    html += '<li>It\'s a development or beta build</li>';
+                    var html = '<div class="fpp-alert fpp-alert--warning" style="display: block;">';
+                    html += '<div><i class="fas fa-info-circle"></i> <strong>Release notes not found for version ' + version + '.</strong></div>';
+                    html += '<div class="mt-3">This may be because:</div>';
+                    html += '<ul style="margin: 0.5rem 0 1rem 1.5rem; padding: 0;">';
+                    html += '<li>This is a minor version update. Refer to the major version for release notes.</li>';
                     html += '<li>The release notes are not available on GitHub</li></ul>';
-                    html += '<a href=\"https://github.com/FalconChristmas/fpp/releases\" target=\"_blank\" class=\"btn btn-outline-primary mt-2\">';
-                    html += '<i class=\"fas fa-external-link-alt\"></i> Browse All Releases on GitHub';
+                    html += '<a href="https://github.com/FalconChristmas/fpp/releases" target="_blank" class="fpp-btn fpp-btn--outline">';
+                    html += '<i class="fas fa-external-link-alt"></i> Browse All Releases on GitHub';
                     html += '</a>';
                     html += '</div>';
                     $('#osReleaseNotesModal .modal-body').html(html);
@@ -971,15 +964,6 @@
                                 <button class="fpp-btn fpp-btn--success" id="fppUpdateButton" onclick="HandleFPPUpdate();">
                                     <i class="fas fa-download"></i> <span id="fppUpdateButtonText">Update FPP Now</span>
                                 </button>
-                                <?php if (isset($settings['uiLevel']) && $settings['uiLevel'] >= 1) { ?>
-                                    <button class="fpp-btn fpp-btn--outline" id="fppWhatsNewButton" onclick="OpenChangelogModal();">
-                                        <i class="fas fa-list"></i> <span id="fppWhatsNewButtonText">View Changelog</span>
-                                    </button>
-                                <?php } else { ?>
-                                    <button class="fpp-btn fpp-btn--outline" id="fppWhatsNewButton" onclick="OpenChangelogModal();">
-                                        <i class="fas fa-gift"></i> <span id="fppWhatsNewButtonText">What's New</span>
-                                    </button>
-                                <?php } ?>
                                 <?php
                                 if ($settings['uiLevel'] > 0) {
                                     $upgradeSources = array();
