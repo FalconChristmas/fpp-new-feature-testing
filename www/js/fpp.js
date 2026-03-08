@@ -36,10 +36,13 @@ var FPP_UPDATE_STATE = {
 	branchUpgradeAvailable: false,
 	branchUpgradeTarget: '',
 	branchUpgradeVersion: '',
+	isMajorVersionUpgrade: false,
 	commitUpdateAvailable: false,
 	remoteCommit: '',
 	currentBranch: '',
 	localCommit: '',
+	isEndOfLife: false,
+	latestMajorVersion: 0,
 	checked: false
 };
 
@@ -9365,10 +9368,13 @@ function checkForFppUpdate () {
 			FPP_UPDATE_STATE.branchUpgradeAvailable = data.branchUpgradeAvailable;
 			FPP_UPDATE_STATE.branchUpgradeTarget = data.branchUpgradeTarget;
 			FPP_UPDATE_STATE.branchUpgradeVersion = data.branchUpgradeVersion;
+			FPP_UPDATE_STATE.isMajorVersionUpgrade = data.isMajorVersionUpgrade || false;
 			FPP_UPDATE_STATE.commitUpdateAvailable = data.commitUpdateAvailable;
 			FPP_UPDATE_STATE.remoteCommit = data.remoteCommit;
 			FPP_UPDATE_STATE.currentBranch = data.currentBranch;
 			FPP_UPDATE_STATE.localCommit = data.localCommit;
+			FPP_UPDATE_STATE.isEndOfLife = data.isEndOfLife || false;
+			FPP_UPDATE_STATE.latestMajorVersion = data.latestMajorVersion || 0;
 			FPP_UPDATE_STATE.checked = true;
 
 			// Update navbar indicator
@@ -9412,6 +9418,13 @@ function checkForFppUpdate () {
 						FPP_UPDATE_STATE.branchUpgradeAvailable = true;
 						FPP_UPDATE_STATE.branchUpgradeTarget = latest_non_master;
 						FPP_UPDATE_STATE.branchUpgradeVersion = latest_non_master.replace(/^v/, '');
+
+						// Check if this is a major version upgrade
+						var currentMatch = FPP_BRANCH.match(/^v?(\d+)/);
+						var targetMatch = latest_non_master.match(/^v?(\d+)/);
+						if (currentMatch && targetMatch) {
+							FPP_UPDATE_STATE.isMajorVersionUpgrade = parseInt(targetMatch[1]) > parseInt(currentMatch[1]);
+						}
 					}
 					if (remote_commit && !remote_commit.startsWith(FPP_LOCAL_COMMIT)) {
 						FPP_UPDATE_STATE.commitUpdateAvailable = true;

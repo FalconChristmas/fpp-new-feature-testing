@@ -36,6 +36,7 @@
         var osAssetMap = {};
         var fppUpdateAvailable = false;
         var osUpgradeAvailable = false;
+        var forceOsUpgradeTest = false; // Test mode flag - prevents PopulateOSSelect from overwriting
         var currentOSRelease = null;
 
         /**
@@ -165,45 +166,47 @@
             });
         }
 
-        // Check if both FPP update and OS upgrade are available and show recommendation
+        // Check upgrade scenarios and show appropriate banners
         function checkUpgradeRecommendation() {
+            // Major FPP version upgrades: OS banner already configured in UpdateVersionInfo(), no separate recommendation needed
+            if (isMajorVersionUpgrade) {
+                $('#upgradeRecommendationBanner').hide();
+                $('#fppRecommendedBadge').hide();
+                $('#osRecommendedBadge').hide();
+                return;
+            }
+
             if (fppUpdateAvailable && osUpgradeAvailable) {
-                // Check if this is a major version jump (e.g., v9 to v10)
-                var currentMajor = parseInt('<?= getFPPMajorVersion() ?>');
-                var osSelect = $('#osSelect option:selected').text();
-                var isMajorVersionJump = false;
-
-                // Try to detect major version from selected OS filename
-                var versionMatch = osSelect.match(/v?(\d+)\./i);
-                if (versionMatch) {
-                    var selectedMajor = parseInt(versionMatch[1]);
-                    isMajorVersionJump = selectedMajor > currentMajor;
-                }
-
-                if (isMajorVersionJump) {
-                    // Recommend OS upgrade for major version jumps
-                    $('#upgradeRecommendationTitle').text('Major Version Available');
-                    $('#upgradeRecommendationMessage').html(
-                        'A new major version of FPP is available. This requires an OS upgrade. ' +
-                        'Please <a href="backup.php">backup your configuration</a> first!'
-                    );
-                    $('#osRecommendedBadge').show();
-                    $('#fppRecommendedBadge').hide();
-                } else {
-                    // Recommend FPP update for regular updates (use default text)
-                    $('#upgradeRecommendationTitle').text('Recommended: Update FPP Software First');
-                    $('#upgradeRecommendationMessage').text(
-                        'Both a software update and OS upgrade are available. We recommend updating ' +
-                        'FPP software first - it\'s quick (2-5 min). It resolves any bugs and provides a clean upgrade path. '
-                    );
-                    $('#fppRecommendedBadge').show();
-                    $('#osRecommendedBadge').hide();
-                }
+                // Both FPP update and OS upgrade available (non-major version)
+                $('#upgradeRecommendationTitle').text('Recommended: Update FPP Software First');
+                $('#upgradeRecommendationMessage').text(
+                    'Both a software update and OS upgrade are available. We recommend updating ' +
+                    'FPP software first - it\'s quick (2-5 min). It resolves any bugs and provides a clean upgrade path. '
+                );
+                $('#fppRecommendedBadge').show();
+                $('#osRecommendedBadge').hide();
                 $('#upgradeRecommendationBanner').show();
+                $('#osUpdateBanner').hide();
+            } else if (!fppUpdateAvailable && osUpgradeAvailable) {
+                // FPP is up to date, but OS upgrade available
+                $('#upgradeRecommendationBanner').hide();
+                $('#fppRecommendedBadge').hide();
+                $('#osRecommendedBadge').hide();
+                // Show OS banner
+                $('#osUpdateBanner')
+                    .removeClass('fpp-banner--success')
+                    .addClass('fpp-banner--warning')
+                    .show();
+                $('#osUpdateBanner .fpp-banner__title').text('Operating System Upgrade Available');
+                $('#osUpdateBanner .fpp-banner__message').text(
+                    'A newer OS version is available. OS upgrades include security patches, new hardware support, and system improvements. Always backup first!'
+                );
+                $('#osUpdateBanner .fpp-banner__icon i').removeClass('fa-arrow-circle-up').addClass('fa-exclamation-triangle');
             } else {
                 $('#upgradeRecommendationBanner').hide();
                 $('#fppRecommendedBadge').hide();
                 $('#osRecommendedBadge').hide();
+                $('#osUpdateBanner').hide();
             }
         }
 
@@ -234,6 +237,8 @@
 
         // Track what type of update is available
         var branchUpgradeData = null;
+        var isMajorVersionUpgrade = false;
+        var isEndOfLife = false;
 
         function UpdateVersionInfo(testMode) {
             // Fetch system status for version info
@@ -301,32 +306,88 @@
                 // Hide all standard view states
                 $('#fppVersionStandardBranchUpgrade, #fppVersionStandardCommitUpdate, #fppVersionStandardCurrent').hide();
 
+                // Check for End of Life status
+                isEndOfLife = updateData.isEndOfLife || false;
+                if (isEndOfLife) {
+                    $('#eolCurrentVersion').text('v<?= getFPPMajorVersion() ?>');
+                    $('#eolLatestVersion').text('v' + updateData.latestMajorVersion);
+                    $('#eolBanner').show();
+                } else {
+                    $('#eolBanner').hide();
+                }
+
                 if (updateData.branchUpgradeAvailable) {
                     // Branch upgrade available - takes priority
                     branchUpgradeData = updateData;
                     fppUpdateAvailable = true;
 
-                    $('#gitUpdateBadge').text('Upgrade to ' + updateData.branchUpgradeTarget).show();
-                    $('#fppUpdateBanner').show();
-                    $('#fppVersionStatusBadge').removeClass('fpp-badge--neutral fpp-badge--success').addClass('fpp-badge--warning').text('Upgrade Available');
+                    isMajorVersionUpgrade = updateData.isMajorVersionUpgrade || false;
 
-                    // Standard view: show branch upgrade
-                    $('#fppVersionStandardBranchUpgrade').show();
-                    $('#fppTargetVersion').text('FPP ' + updateData.branchUpgradeVersion);
+                    if (isMajorVersionUpgrade) {
+                        // Major version upgrades REQUIRE OS upgrade
+                        $('#gitUpdateBadge').text('Requires OS Upgrade').show();
+                        $('#fppUpdateBanner').hide();
 
-                    // Advanced view
-                    $('#fppVersionIndicator').show();
-                    $('#fppVersionCurrent').hide();
-                    $('#remoteGitShort').text(updateData.branchUpgradeTarget);
-                    $('#commitCount').parent().hide();
+                        // Show OS banner
+                        $('#osUpdateBanner')
+                            .removeClass('fpp-banner--warning')
+                            .addClass('fpp-banner--success')
+                            .show();
+                        $('#osUpdateBanner .fpp-banner__title').text('FPP ' + updateData.branchUpgradeVersion + ' Available - OS Upgrade Required');
+                        $('#osUpdateBanner .fpp-banner__message').html(
+                            'A new major version of FPP is available! Major version upgrades require a fresh OS image. ' +
+                            'Please <a href="backup.php">backup your configuration</a> first, then select the matching OS image below.'
+                        );
+                        $('#osUpdateBanner .fpp-banner__icon i').removeClass('fa-exclamation-triangle').addClass('fa-arrow-circle-up');
 
-                    // Update button text for branch upgrade
-                    $('#fppUpdateButtonText').text('Upgrade to ' + updateData.branchUpgradeTarget);
+                        $('#fppVersionStatusBadge').removeClass('fpp-badge--neutral fpp-badge--success').addClass('fpp-badge--warning').text('OS Upgrade Required');
+                        // Signal that OS upgrade path should be used
+                        osUpgradeAvailable = true;
+
+                        // Standard view: show that OS upgrade is needed
+                        $('#fppVersionStandardBranchUpgrade').show();
+                        $('#fppTargetVersion').text('FPP ' + updateData.branchUpgradeVersion);
+                        // Add visual indication that this requires OS upgrade
+                        $('#fppVersionStandardBranchUpgrade .fpp-badge').text('Requires OS Upgrade').removeClass('fpp-badge--warning').addClass('fpp-badge--info');
+
+                        // Advanced view
+                        $('#fppVersionIndicator').show();
+                        $('#fppVersionCurrent').hide();
+                        $('#remoteGitShort').text(updateData.branchUpgradeTarget);
+                        $('#commitCount').parent().hide();
+
+                        // Disable FPP update button as users must use OS upgrade
+                        $('#fppUpdateButton').prop('disabled', true);
+                        $('#fppUpdateButtonText').text('Use OS Upgrade');
+                    } else {
+                        // Minor version branch upgrade
+                        $('#gitUpdateBadge').text('Upgrade to ' + updateData.branchUpgradeTarget).show();
+                        $('#fppUpdateBanner').show();
+                        $('#fppVersionStatusBadge').removeClass('fpp-badge--neutral fpp-badge--success').addClass('fpp-badge--warning').text('Upgrade Available');
+
+                        // Standard view: show branch upgrade
+                        $('#fppVersionStandardBranchUpgrade').show();
+                        $('#fppTargetVersion').text('FPP ' + updateData.branchUpgradeVersion);
+
+                        $('#fppVersionIndicator')
+                            .attr('onclick', 'HandleFPPUpdate();')
+                            .attr('title', 'Click to see release notes')
+                            .show();
+                        $('#fppVersionIndicator .fpp-version-indicator__label')
+                            .html('<i class="fas fa-file-alt"></i> Click to see release notes');
+                        $('#fppVersionCurrent').hide();
+                        $('#remoteGitShort').text(updateData.branchUpgradeTarget);
+
+                        // Update button text for branch upgrade
+                        $('#fppUpdateButton').prop('disabled', false);
+                        $('#fppUpdateButtonText').text('Upgrade to ' + updateData.branchUpgradeTarget);
+                    }
 
                 } else if (updateData.commitUpdateAvailable) {
                     // Commit update available (same version, new commits)
                     branchUpgradeData = null;
                     fppUpdateAvailable = true;
+                    isMajorVersionUpgrade = false;
 
                     $('#remoteGitShort').text(updateData.remoteCommit.substring(0, 9));
                     $('#gitUpdateBadge').text('Update Available').show();
@@ -336,30 +397,53 @@
                     // Standard view: show commit update (no version arrow)
                     $('#fppVersionStandardCommitUpdate').show();
 
-                    // Advanced view
-                    $('#fppVersionIndicator').show();
+                    // Advanced view:  commit updates show git log
+                    $('#fppVersionIndicator')
+                        .attr('onclick', 'GetGitOriginLog();')
+                        .attr('title', 'Click to preview changes')
+                        .show();
                     $('#fppVersionCurrent').hide();
-                    $('#commitCount').parent().show();
 
-                    // Fetch commit count
+                    // Fetch commit count and update label
                     getGitCommitCount(function(count) {
                         if (count > 0) {
                             $('#commitCount').text(count);
                             $('#commitCountStandard').text(count);
+                            $('#fppVersionIndicator .fpp-version-indicator__label')
+                                .html('<i class="fas fa-search"></i> ' + count + ' changes behind');
                         }
                     });
 
                     // Button text for commit update
+                    $('#fppUpdateButton').prop('disabled', false);
                     $('#fppUpdateButtonText').text('Update FPP Now');
 
                 } else {
                     // Up to date
                     branchUpgradeData = null;
                     fppUpdateAvailable = false;
+                    isMajorVersionUpgrade = false;
+
+                    // Test mode: force OS upgrade available
+                    if (updateData.forceOsUpgradeAvailable) {
+                        osUpgradeAvailable = true;
+                        forceOsUpgradeTest = true;
+                    }
 
                     $('#gitUpdateBadge').hide();
                     $('#fppUpdateBanner').hide();
+                    // Don't hide OS banner here - let checkUpgradeRecommendation() handle it
+                    // based on whether osUpgradeAvailable is set
                     $('#fppVersionStatusBadge').removeClass('fpp-badge--neutral fpp-badge--warning').addClass('fpp-badge--success').text('Up to Date');
+
+                    // When up to date: disable button for basic users, keep enabled for advanced
+                    if (isAdvancedView) {
+                        $('#fppUpdateButton').prop('disabled', false);
+                        $('#fppUpdateButtonText').text('Update FPP Now');
+                    } else {
+                        $('#fppUpdateButton').prop('disabled', true);
+                        $('#fppUpdateButtonText').text('Up to Date');
+                    }
 
                     // Standard view
                     $('#fppVersionStandardCurrent').show();
@@ -473,11 +557,15 @@
                         }
                     });
 
-                    osUpgradeAvailable = checkForNewerOS();
+                    if (!forceOsUpgradeTest) {
+                        osUpgradeAvailable = checkForNewerOS();
+                    }
                     checkUpgradeRecommendation();
                 }).fail(function () {
                     // API failed - still show any locally downloaded OS files
-                    osUpgradeAvailable = checkForNewerOS();
+                    if (!forceOsUpgradeTest) {
+                        osUpgradeAvailable = checkForNewerOS();
+                    }
                     checkUpgradeRecommendation();
                 });
 
@@ -681,7 +769,7 @@
             });
         }
 
-        // Test mode support: append ?test=branch (or commit, both, uptodate)
+        // Test mode support: append ?test=branch (or commit, both, uptodate, major/eol, osonly)
         var upgradeTestMode = new URLSearchParams(window.location.search).get('test');
 
         $(document).ready(function () {
@@ -707,6 +795,20 @@
             <div class="pageContent">
 
                 <!-- Update Banners (conditionally shown) -->
+                <div id="eolBanner" class="fpp-banner fpp-banner--danger" style="display: none;">
+                    <div class="fpp-banner__icon">
+                        <i class="fas fa-exclamation-circle"></i>
+                    </div>
+                    <div class="fpp-banner__content">
+                        <div class="fpp-banner__title">End of Life Version</div>
+                        <p class="fpp-banner__message">
+                            You are running FPP <span id="eolCurrentVersion"></span>, which has reached End of Life.
+                            This version no longer receives bug fixes or security updates.
+                            Please upgrade to FPP <span id="eolLatestVersion"></span> via OS Upgrade to continue receiving support.
+                        </p>
+                    </div>
+                </div>
+
                 <div id="fppUpdateBanner" class="fpp-banner fpp-banner--success" style="display: none;">
                     <div class="fpp-banner__icon">
                         <i class="fas fa-check-circle"></i>

@@ -248,8 +248,8 @@ function list_plugin_entries($menu)
             </div>
             <script>
             $(document).on('fpp:updateStatusChanged', function(e, state) {
-                if (state.branchUpgradeAvailable) {
-                    // Branch upgrade available - show banner with release notes link
+                if (state.branchUpgradeAvailable && !state.isMajorVersionUpgrade) {
+                    // Minor branch upgrade available - show banner with release notes link
                     $('#upgradeFlagText').text('FPP ' + state.branchUpgradeTarget + ' is available for install');
                     $('#upgradeFlagButtonText').text('Upgrade to ' + state.branchUpgradeTarget);
                     $('#upgradeFlagButton').off('click').on('click', function() {
@@ -257,7 +257,7 @@ function list_plugin_entries($menu)
                     });
                     $('#upgradeFlag').show();
                 } else {
-                    // No branch upgrade - hide banner
+                    // No branch upgrade or major version (requires OS upgrade) - hide banner
                     $('#upgradeFlag').hide();
                 }
             });
