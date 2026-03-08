@@ -12,28 +12,7 @@
     <?php
     $fppVersion = getFPPVersion();
     $localGitVersion = get_local_git_version();
-    $remoteGitVersion = get_remote_git_version();
     $fppVersionDisplay = getFPPVersionDisplay();
-
-    $latestReleaseVersion = '';
-    $latestReleaseBody = '';
-    $latestReleaseName = '';
-    $latestReleaseUrl = '';
-    $ch = curl_init('https://api.github.com/repos/FalconChristmas/fpp/releases/latest');
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_USERAGENT, 'FPP');
-    curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-    $response = curl_exec($ch);
-    curl_close($ch);
-    if ($response) {
-        $releaseData = json_decode($response, true);
-        if (isset($releaseData['tag_name'])) {
-            $latestReleaseVersion = $releaseData['tag_name'];
-            $latestReleaseName = $releaseData['name'] ?? $releaseData['tag_name'];
-            $latestReleaseBody = $releaseData['body'] ?? '';
-            $latestReleaseUrl = $releaseData['html_url'] ?? 'https://github.com/FalconChristmas/fpp/releases';
-        }
-    }
 
     $uploadDirectory = $mediaDirectory . "/upload";
     $freeSpace = disk_free_space($uploadDirectory);
@@ -226,102 +205,6 @@
                 $('#fppRecommendedBadge').hide();
                 $('#osRecommendedBadge').hide();
             }
-        }
-
-        // Release notes data from PHP
-        var latestReleaseName = <?= json_encode($latestReleaseName) ?>;
-        var latestReleaseBody = <?= json_encode($latestReleaseBody) ?>;
-        var latestReleaseUrl = <?= json_encode($latestReleaseUrl ?: 'https://github.com/FalconChristmas/fpp/releases') ?>;
-        var latestReleaseVersion = <?= json_encode($latestReleaseVersion) ?>;
-
-        // Simple markdown to HTML converter for release notes
-        function markdownToHtml(md) {
-            if (!md) return '';
-            return md
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/^### (.+)$/gm, '<h5>$1</h5>')
-                .replace(/^## (.+)$/gm, '<h4>$1</h4>')
-                .replace(/^# (.+)$/gm, '<h3>$1</h3>')
-                .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-                .replace(/\*(.+?)\*/g, '<em>$1</em>')
-                .replace(/`(.+?)`/g, '<code>$1</code>')
-                .replace(/^[\-\*] (.+)$/gm, '<li>$1</li>')
-                .replace(/(<li>.*<\/li>\n?)+/g, function(match) {
-                    return '<ul>' + match + '</ul>';
-                })
-                .replace(/\n\n/g, '</p><p>')
-                .replace(/\n/g, '<br>');
-        }
-
-        function OpenChangelogModal() {
-            var isAdvancedView = settings['uiLevel'] && (parseInt(settings['uiLevel']) >= 1);
-            var modalTitle = isAdvancedView ? 'FPP Changelog (Git Commits)' : "What's New in FPP";
-
-            ShowLoadingModal('changelogModal', modalTitle, isAdvancedView ? 'modal-xl' : 'modal-lg');
-
-            fetchGitOriginLog(function(data) {
-                if (data === null) {
-                    $('#changelogModal .modal-body').html('<div class="alert alert-danger">Failed to load changelog</div>');
-                    return;
-                }
-
-                var html = '<div style="max-height: 70vh; overflow-y: auto;">';
-
-                if (isAdvancedView) {
-                    html += '<p class="alert alert-info"><i class="fas fa-info-circle"></i> This shows the git commit history for your current branch. Each entry represents a change to the FPP software.</p>';
-                    html += buildGitLogTableHtml(data, {
-                        showDate: true,
-                        commitWidth: '100px',
-                        emptyHtml: '<tr><td colspan="4" class="text-center">No changelog entries found</td></tr>'
-                    });
-                } else {
-                    // Standard view: Show actual GitHub release notes
-                    var updateCount = (data.rows && data.rows.length > 0) ? data.rows.length : 0;
-
-                    html += '<div class="fpp-changelog-summary">';
-
-                    if (updateCount > 0) {
-                        html += '<p class="fpp-changelog-summary__intro">';
-                        html += '<i class="fas fa-gift fpp-text-success fpp-icon-lead"></i>';
-                        html += '<strong>' + updateCount + ' update' + (updateCount > 1 ? 's' : '') + '</strong> ready to install';
-                        html += '</p>';
-                    }
-
-                    if (latestReleaseBody) {
-                        // Show actual release notes
-                        if (latestReleaseName) {
-                            html += '<h4 class="fpp-release-title"><i class="fas fa-tag fpp-text-info"></i> ' + latestReleaseName + '</h4>';
-                        }
-                        html += '<div class="fpp-release-notes">';
-                        html += '<p>' + markdownToHtml(latestReleaseBody) + '</p>';
-                        html += '</div>';
-                    } else if (updateCount > 0) {
-                        // Fallback if no release notes available
-                        html += '<div class="fpp-changelog-info">';
-                        html += '<p class="text-muted">Detailed release notes are not available for this update.</p>';
-                        html += '<p>Click the button below to view the full release history on GitHub.</p>';
-                        html += '</div>';
-                    } else {
-                        html += '<div class="text-center py-4">';
-                        html += '<i class="fas fa-check-circle fa-3x fpp-text-success"></i>';
-                        html += '<p class="mt-3">Your FPP software is up to date!</p>';
-                        html += '</div>';
-                    }
-
-                    html += '</div>';
-                }
-
-                html += '<div class="text-center mt-3">';
-                html += '<a href="' + latestReleaseUrl + '" target="_blank" class="btn btn-outline-primary">';
-                html += '<i class="fas fa-external-link-alt"></i> View Full Release on GitHub';
-                html += '</a>';
-                html += '</div>';
-                html += '</div>';
-
-                $('#changelogModal .modal-body').html(html);
-            }, true); // force refresh for changelog
         }
 
         function GetGitOriginLog() {
@@ -922,7 +805,7 @@
                                 <div id="fppVersionStandardBranchUpgrade" class="fpp-version-indicator fpp-version-indicator--clickable" style="display: none;" onclick="HandleFPPUpdate();" title="Click to see release notes">
                                     <span class="fpp-version-indicator__current"><?= $fppVersionDisplay ?></span>
                                     <i class="fas fa-arrow-right fpp-version-indicator__arrow"></i>
-                                    <span class="fpp-version-indicator__to" id="fppTargetVersion"><?= $latestReleaseVersion ? 'FPP ' . $latestReleaseVersion : 'Latest' ?></span>
+                                    <span class="fpp-version-indicator__to" id="fppTargetVersion">Latest</span>
                                     <span class="fpp-badge fpp-badge--warning fpp-badge--sm">Upgrade Available</span>
                                     <span class="fpp-version-indicator__label fpp-version-indicator__label--subtle">Click to see release notes</span>
                                 </div>
