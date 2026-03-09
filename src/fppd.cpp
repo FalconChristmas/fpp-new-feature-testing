@@ -81,6 +81,8 @@
 #include "mediaoutput/AES67Manager.h"
 #include "mediaoutput/MediaOutputBase.h"
 #include "mediaoutput/MediaOutputStatus.h"
+#include "mediaoutput/VideoInputManager.h"
+#include "mediaoutput/VideoOutputManager.h"
 #include "mediaoutput/mediaoutput.h"
 #include "overlays/PixelOverlay.h"
 #include "playlist/Playlist.h"
@@ -778,6 +780,8 @@ int main(int argc, char* argv[]) {
     AES67Manager::INSTANCE.Init();
     AES67Manager::INSTANCE.ApplyConfig();
 #endif
+    VideoInputManager::Instance().Init();
+    VideoOutputManager::Instance().Init();
     PixelOverlayManager::INSTANCE.Initialize();
     PingManager::INSTANCE.Initialize();
     InitializeChannelOutputs();
@@ -802,6 +806,8 @@ int main(int argc, char* argv[]) {
     // events while we are shutting down
     Events::PrepareForShutdown();
 
+    VideoInputManager::Instance().Shutdown();
+    VideoOutputManager::Instance().Shutdown();
 #ifdef HAS_AES67_GSTREAMER
     AES67Manager::INSTANCE.Shutdown();
 #endif
