@@ -133,7 +133,7 @@ OBJECTS_fpp_so += \
 
 LIBS_fpp_so += \
     -lzstd -lz \
-	-lhttpserver \
+	-ldrogon -ltrantor \
 	-ljsoncpp \
 	-lm \
 	-lcurl \
