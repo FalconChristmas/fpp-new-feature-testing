@@ -2112,6 +2112,153 @@ function get_remote_git_version()
     return $git_remote_version;
 }
 
+/**
+ * Check for FPP updates via fppstats API
+ * Returns unified update status for both branch upgrades and commit updates
+ * @param string $latestReleaseVersion Optional pre-fetched latest release version (from GitHub API)
+ * @return array Update status with branchUpgradeAvailable, commitUpdateAvailable, etc.
+ */
+function check_fppstats_updates($latestReleaseVersion = null)
+{
+    global $settings;
+
+    $currentBranch = getFPPBranch();
+    $localCommit = get_local_git_version();
+    $fppVersion = getFPPVersion();
+
+    $fppVersionFloat = 0;
+    if (preg_match('/^v?(\d+\.\d+)/', $currentBranch, $matches)) {
+        $fppVersionFloat = floatval($matches[1]);
+    } elseif (preg_match('/^(\d+)\./', $fppVersion, $matches)) {
+        $fppVersionFloat = floatval($matches[1]);
+    }
+
+    $result = [
+        'branchUpgradeAvailable' => false,
+        'branchUpgradeTarget' => '',
+        'branchUpgradeVersion' => '',
+        'commitUpdateAvailable' => false,
+        'remoteCommit' => '',
+        'currentBranch' => $currentBranch,
+        'localCommit' => $localCommit,
+        'fppVersionFloat' => $fppVersionFloat
+    ];
+
+    // Skip branch upgrade detection for master branch users
+    $checkBranchUpgrade = ($currentBranch !== 'master' && $currentBranch !== 'main');
+
+    $fppstatsData = file_cache('fppstats_commits', function () {
+        $ch = curl_init('https://fppstats.falconchristmas.com/api/fpp_commits');
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_USERAGENT, 'FPP');
+        curl_setopt($ch, CURLOPT_TIMEOUT, 5);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 3);
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($response && $httpCode === 200) {
+            return $response;
+        }
+        return '';
+    }, 90, 30);
+
+    if (!empty($fppstatsData)) {
+        $data = json_decode($fppstatsData, true);
+
+        if (isset($data['branches']) && is_array($data['branches'])) {
+            $latestNonMaster = '';
+            $latestNonMasterEpoch = 0;
+
+            foreach ($data['branches'] as $branch) {
+                // Check for remote commit on current branch
+                if ($branch['name'] === $currentBranch) {
+                    $remoteCommit = $branch['commit']['sha'] ?? '';
+                    $result['remoteCommit'] = $remoteCommit;
+
+                    // Check if local is behind remote (commit update available)
+                    if (!empty($remoteCommit) && !empty($localCommit) &&
+                        strpos($remoteCommit, $localCommit) !== 0 &&
+                        strpos($localCommit, $remoteCommit) !== 0) {
+                        $result['commitUpdateAvailable'] = true;
+                    }
+                }
+
+                // Check for newer release branches (only for non-master users)
+                if ($checkBranchUpgrade && $branch['name'] !== 'master') {
+                    // Only consider branches that start with 'v' followed by a digit
+                    if (preg_match('/^v(\d+\.\d+)/', $branch['name'], $matches)) {
+                        $branchVersion = floatval($matches[1]);
+                        $branchEpoch = $branch['commit']['date_epoch'] ?? 0;
+
+                        if ($branchVersion >= $fppVersionFloat && $branchEpoch > $latestNonMasterEpoch) {
+                            $latestNonMaster = $branch['name'];
+                            $latestNonMasterEpoch = $branchEpoch;
+                        }
+                    }
+                }
+            }
+
+            // Check if a newer branch is available
+            if ($checkBranchUpgrade && !empty($latestNonMaster) && $latestNonMaster !== $currentBranch) {
+                $result['branchUpgradeAvailable'] = true;
+                $result['branchUpgradeTarget'] = $latestNonMaster;
+                // Strip 'v' prefix for GitHub API
+                $result['branchUpgradeVersion'] = ltrim($latestNonMaster, 'v');
+            }
+        }
+    } else {
+        // Fallback: fppstats unreachable
+        $remoteGitVersion = get_remote_git_version();
+        $result['remoteCommit'] = $remoteGitVersion;
+
+        if (!empty($remoteGitVersion) && $remoteGitVersion !== 'Unknown' &&
+            !empty($localCommit) && $localCommit !== 'Unknown' &&
+            $remoteGitVersion !== $localCommit) {
+            $result['commitUpdateAvailable'] = true;
+        }
+    }
+
+    if ($latestReleaseVersion && $result['branchUpgradeAvailable']) {
+        // Ensure the branch upgrade target matches
+        $latestVersionFloat = floatval(ltrim($latestReleaseVersion, 'v'));
+        $targetVersionFloat = floatval($result['branchUpgradeVersion']);
+
+        // Only show branch upgrade if target is at or above the official latest release
+        if ($targetVersionFloat < $latestVersionFloat) {
+            // Update to the official latest release instead
+            $result['branchUpgradeTarget'] = 'v' . $latestReleaseVersion;
+            $result['branchUpgradeVersion'] = ltrim($latestReleaseVersion, 'v');
+        }
+    }
+
+    return $result;
+}
+
+/**
+ * Returns a user-friendly version string for display to standard users
+ * For master/main branch: "FPP 9.x"
+ * For release branches (v9.3): "FPP 9.3"
+ * For other branches: "FPP 9.x (branch-name)"
+ * @return string
+ */
+function getFPPVersionDisplay()
+{
+    $major = getFPPMajorVersion();
+    $branch = getFPPBranch();
+
+    // For master/main branch, show "FPP 9.x" format
+    if ($branch == 'master' || $branch == 'main') {
+        return "FPP " . $major . ".x";
+    }
+    // For release branches (e.g., "v9.3"), show clean version
+    if (preg_match('/^v?(\d+\.\d+)/', $branch, $matches)) {
+        return "FPP " . $matches[1];
+    }
+    // Fallback: use major version with branch name
+    return "FPP " . $major . ".x (" . $branch . ")";
+}
+
 function ReplaceIllegalCharacters($input_string)
 {
     // Removes any of the following characters from the supplied name, can be used to cleanse playlist names, event names etc

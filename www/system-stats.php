@@ -668,12 +668,12 @@ if (isset($_GET['cpu'])) {
                                 </h5>
                             </div>
                             <div id="memoryHelpContent" style="display: none;">
-                                <div class="memory-help">
-                                    <p><span class="memory-help__color memory-help__color--used"></span><strong>Used Memory</strong><br>
+                                <div class="fpp-help-content">
+                                    <p><span class="fpp-help-swatch fpp-help-swatch--success"></span><strong>Used Memory</strong><br>
                                     Memory actively used by applications and the OS.</p>
-                                    <p><span class="memory-help__color memory-help__color--buffer"></span><strong>Buffer/Cache</strong><br>
+                                    <p><span class="fpp-help-swatch fpp-help-swatch--info"></span><strong>Buffer/Cache</strong><br>
                                     Memory used for disk caching. Can be reclaimed if needed.</p>
-                                    <p><span class="memory-help__color memory-help__color--free"></span><strong>Free Memory</strong><br>
+                                    <p><span class="fpp-help-swatch fpp-help-swatch--muted"></span><strong>Free Memory</strong><br>
                                     Completely unused memory.</p>
                                     <hr>
                                     <p style="margin-bottom:0;"><em>High buffer/cache is normal — it means your system is efficiently using available RAM.</em></p>
@@ -838,12 +838,12 @@ if (isset($_GET['cpu'])) {
                             $threshYellow = number_format($coresNum * 0.90, 2);
                             ?>
                             <div id="busynessHelpContent" style="display: none;">
-                                <div class="busyness-help">
-                                    <p><span class="busyness-help__color busyness-help__color--green"></span><strong>Running smoothly</strong> (below <?= $threshGreen ?>)<br>
+                                <div class="fpp-help-content">
+                                    <p><span class="fpp-help-swatch fpp-help-swatch--success"></span><strong>Running smoothly</strong> (below <?= $threshGreen ?>)<br>
                                     Traffic is light — your system has plenty of capacity.</p>
-                                    <p><span class="busyness-help__color busyness-help__color--yellow"></span><strong>Busy</strong> (<?= $threshGreen ?> – <?= $threshYellow ?>)<br>
+                                    <p><span class="fpp-help-swatch fpp-help-swatch--warning"></span><strong>Busy</strong> (<?= $threshGreen ?> – <?= $threshYellow ?>)<br>
                                     Traffic is moderate — things are getting congested.</p>
-                                    <p><span class="busyness-help__color busyness-help__color--red"></span><strong>Overloaded</strong> (above <?= $threshYellow ?>)<br>
+                                    <p><span class="fpp-help-swatch fpp-help-swatch--danger"></span><strong>Overloaded</strong> (above <?= $threshYellow ?>)<br>
                                     Traffic is heavy — your system is in gridlock.</p>
                                     <hr>
                                     <p style="margin-bottom:0;"><em>Your system is like a highway with <?= $coresNum ?> lanes (CPU cores). The numbers show average load over 1, 5, and 15 minutes. Right now, traffic is <?= $_traffic ?>.</em></p>
