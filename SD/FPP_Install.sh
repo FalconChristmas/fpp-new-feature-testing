@@ -956,6 +956,32 @@ setup_platform_raspberry_pi() {
         # a fresh boot), leaving the monitor in powersave with no console
         # visible. Old FPP images used to comment this out -- don't.
 
+        # Scope vc4-kms-v3d to Pi 4 / Pi 5 / CM4 / CM5. On Pi Zero /
+        # Zero 2 W / 1 / 2 / 3 / CM3 the full KMS stack is heavier than
+        # needed and produces a non-functional vc4hdmi ALSA card that
+        # competes with the legacy snd_bcm2835 HDMI path that those
+        # models actually use. Pi OS ships `dtoverlay=vc4-kms-v3d` in
+        # the [all] section by default; comment those occurrences and
+        # re-add the overlay under explicit [pi4]/[pi5] sections so the
+        # same SD card still boots correctly on newer Pis.
+        if ! grep -qE '^[[:space:]]*#.*FPP scoped vc4-kms-v3d' ${BOOTDIR}/config.txt; then
+            sed -i -E 's/^([[:space:]]*)dtoverlay=vc4-kms-v3d/\1#dtoverlay=vc4-kms-v3d  # FPP scoped vc4-kms-v3d to [pi4]\/[pi5]/' ${BOOTDIR}/config.txt
+            cat >> ${BOOTDIR}/config.txt <<'EOF'
+
+# FPP: vc4-kms-v3d only on Pi 4 / Pi 5 / CM4 / CM5. Older Pis use the
+# legacy firmware-driven HDMI / snd_bcm2835 path.
+[pi4]
+dtoverlay=vc4-kms-v3d
+[pi5]
+dtoverlay=vc4-kms-v3d
+[cm4]
+dtoverlay=vc4-kms-v3d
+[cm5]
+dtoverlay=vc4-kms-v3d
+[all]
+EOF
+        fi
+
         echo "FPP - Adding required modules to modules-load to speed up boot"
         cat >> /etc/modules-load.d/modules.conf <<'EOF'
 i2c_dev
@@ -1023,21 +1049,38 @@ EOF
 
         # snd_bcm2835 is loaded by Pi firmware via dtparam=audio=on before
         # userspace modprobe runs, so /etc/modprobe.d options don't apply.
-        # Kernel-command-line params do. enable_hdmi=0 drops the legacy
-        # bcm2835 HDMI ALSA device, leaving HDMI audio entirely to vc4-hdmi
-        # (the KMS driver in vc4-kms-v3d). All Pi models supported by modern
-        # Pi OS have vc4-hdmi available, including Pi Zero / Zero 2 W / 1-3,
-        # so the legacy device is never the right choice -- when both are
-        # active, vc4-hdmi owns the hardware and bcm2835 HDMI silently
-        # accepts and discards audio, producing no output. Disabling it
-        # also:
-        #   - keeps "bcm2835 Headphones" as card 0 (restores FPP 9 layout)
-        #   - removes duplicate HDMI ALSA entries
-        #   - prevents the bcm2835 HDMI path from re-training the HDMI
-        #     link and briefly blanking the display on some Pi4/Pi5 +
-        #     monitor combinations.
-        echo "FPP - Updating SPI buffer size and audio device selection"
-        sed -i 's/$/ spidev.bufsiz=102400 snd_bcm2835.enable_headphones=1 snd_bcm2835.enable_hdmi=0/' ${BOOTDIR}/cmdline.txt
+        # Kernel-command-line params do. The enable_hdmi value depends on
+        # which video stack the Pi is using:
+        #
+        #   Pi 4 / Pi 5 / CM4 / CM5 (vc4-kms-v3d): enable_hdmi=0
+        #     vc4hdmi (KMS) owns HDMI audio. Leaving the legacy bcm2835
+        #     HDMI ALSA device enabled creates a duplicate card that
+        #     silently swallows audio, and re-training the legacy path
+        #     can briefly blank the display on some Pi4/Pi5 + monitor
+        #     combinations.
+        #
+        #   Pi Zero / Zero 2 W / Pi 1 / Pi 2 / Pi 3 / CM3: enable_hdmi=1
+        #     vc4-kms-v3d is disabled on these models (see config.txt
+        #     edit further down), so the legacy snd_bcm2835 HDMI device
+        #     is the only HDMI audio path. The vc4-hdmi ALSA card still
+        #     loads when vc4-kms-v3d is enabled but its audio is muted
+        #     in the kernel when HPD is not asserted, which on these
+        #     SoCs happens frequently (cheap HDMI extractors, displays
+        #     that don't pulse HPD, etc.). snd_bcm2835 has no such
+        #     dependency.
+        #
+        # MODEL is set at the top of this script from /proc/device-tree/model.
+        # In chroot-based image builds it reflects the build host (often not
+        # a Pi), so we default to enable_hdmi=0 and rely on FPPINIT's
+        # boot-time fixup to flip it on first boot of older hardware.
+        ENABLE_HDMI_AUDIO=0
+        case "$MODEL" in
+            *"Pi Zero"*|*"Pi 1"*|*"Pi 2"*|*"Pi 3"*|*"Compute Module 3"*)
+                ENABLE_HDMI_AUDIO=1
+                ;;
+        esac
+        echo "FPP - Updating SPI buffer size and audio device selection (enable_hdmi=${ENABLE_HDMI_AUDIO} for '${MODEL:-unknown}')"
+        sed -i "s/\$/ spidev.bufsiz=102400 snd_bcm2835.enable_headphones=1 snd_bcm2835.enable_hdmi=${ENABLE_HDMI_AUDIO}/" ${BOOTDIR}/cmdline.txt
 
         echo "FPP - Updating root partition device"
         sed -i 's/root=PARTUUID=[A-Fa-f0-9-]* /root=\/dev\/mmcblk0p2 /g' ${BOOTDIR}/cmdline.txt

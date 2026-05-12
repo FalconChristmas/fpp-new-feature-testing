@@ -175,27 +175,128 @@ inline bool isPiZero2W() {
     return contains(GetFileContents("/proc/device-tree/model"), "Raspberry Pi Zero 2 W");
 }
 
-// Force snd_bcm2835.enable_hdmi=0 in cmdline.txt if an older FPP image set
-// it to =1. The legacy bcm2835 HDMI ALSA device conflicts with vc4-hdmi
-// (KMS): vc4-hdmi owns the HDMI hardware, so the legacy device silently
-// swallows audio. All modern Pi OS kernels expose vc4-hdmi on every
-// supported model, so the legacy device is never the right choice.
-// Returns true if cmdline.txt was modified (caller must reboot for the
-// kernel parameter to take effect).
+// Returns true if the running Pi needs the legacy snd_bcm2835 HDMI audio
+// device. Pi 4 / Pi 5 / CM4 / CM5 run vc4-kms-v3d and get HDMI audio via
+// vc4hdmi (KMS). Pi Zero / Zero 2 W / 1 / 2 / 3 / CM3 run the legacy
+// firmware-driven HDMI path; vc4hdmi loads but its audio engine sits
+// muted whenever HPD isn't asserted, so snd_bcm2835 HDMI is the only
+// reliable route on these models.
+inline bool piNeedsLegacyHDMIAudio() {
+    const std::string m = GetFileContents("/proc/device-tree/model");
+    if (m.empty()) return false;
+    return contains(m, "Pi Zero")
+        || startsWith(m, "Raspberry Pi 1")
+        || startsWith(m, "Raspberry Pi Model")  // original Pi 1, no version in name
+        || startsWith(m, "Raspberry Pi 2")
+        || startsWith(m, "Raspberry Pi 3")
+        || contains(m, "Compute Module 3");
+}
+
+// Reconcile snd_bcm2835.enable_hdmi in cmdline.txt with what this Pi model
+// actually needs. Returns true if cmdline.txt was modified (caller must
+// reboot for the kernel parameter to take effect).
 //
-// Only touches cmdline.txt if the FPP-managed parameter is already
-// present; hand-built systems without it are left alone.
+// Boot-time counterpart to FPP_Install.sh's enable_hdmi selection:
+// chroot-based image builds can't reliably read the target model
+// (/proc/device-tree/model reflects the build host), so the installer's
+// choice may be wrong for the first real boot. We only touch cmdline.txt
+// if the FPP-managed parameter is already present; hand-built systems
+// without it are left alone.
 static bool ensureCmdlineAudioParam() {
     const std::string path = "/boot/firmware/cmdline.txt";
     std::string cmdline = GetFileContents(path);
     if (cmdline.empty()) return false;
 
-    if (contains(cmdline, "snd_bcm2835.enable_hdmi=0")) return false;  // already correct
-    if (!contains(cmdline, "snd_bcm2835.enable_hdmi=1")) return false; // not FPP-managed
+    bool wantHDMI = piNeedsLegacyHDMIAudio();
+    const std::string want = wantHDMI ? "snd_bcm2835.enable_hdmi=1" : "snd_bcm2835.enable_hdmi=0";
+    const std::string other = wantHDMI ? "snd_bcm2835.enable_hdmi=0" : "snd_bcm2835.enable_hdmi=1";
 
-    replaceAll(cmdline, "snd_bcm2835.enable_hdmi=1", "snd_bcm2835.enable_hdmi=0");
-    printf("FPP - Disabling legacy bcm2835 HDMI in cmdline.txt (vc4-hdmi owns HDMI audio); reboot required\n");
+    if (contains(cmdline, want)) return false;       // already correct
+    if (!contains(cmdline, other)) return false;     // not FPP-managed; leave alone
+
+    replaceAll(cmdline, other, want);
+    std::string model = GetFileContents("/proc/device-tree/model");
+    TrimWhiteSpace(model);
+    printf("FPP - Pi model '%s' requires %s; updating cmdline.txt (reboot required)\n",
+           model.c_str(), want.c_str());
     PutFileContents(path, cmdline);
+    return true;
+}
+
+// Reconcile vc4-kms-v3d in config.txt with what this Pi model needs.
+// Legacy Pis (Zero / Zero 2 W / 1 / 2 / 3 / CM3) should not load KMS:
+// the vc4hdmi ALSA card it creates is non-functional on those SoCs (it
+// shows up but produces no audio) and competes with the legacy
+// snd_bcm2835 HDMI path. On Pi 4 / Pi 5 / CM4 / CM5 KMS is required.
+//
+// Detects an unscoped `dtoverlay=vc4-kms-v3d` (i.e. in [all] context)
+// and, on a legacy Pi, comments it out and adds the overlay under
+// [pi4]/[pi5]/[cm4]/[cm5] sections so the image stays portable.
+// Returns true if config.txt was modified.
+static bool ensureConfigVideoOverlay() {
+    if (!piNeedsLegacyHDMIAudio()) return false;
+
+    const std::string path = "/boot/firmware/config.txt";
+    std::string cfg = GetFileContents(path);
+    if (cfg.empty()) return false;
+
+    if (contains(cfg, "# FPP scoped vc4-kms-v3d")) return false;  // already done
+
+    // Find an uncommented dtoverlay=vc4-kms-v3d line. Skip if none exist.
+    bool hasUnscoped = false;
+    {
+        std::vector<std::string> lines = split(cfg, '\n');
+        std::string section = "[all]";
+        for (auto& ln : lines) {
+            std::string t = ln;
+            TrimWhiteSpace(t);
+            if (!t.empty() && t.front() == '[' && t.back() == ']') {
+                section = t;
+                continue;
+            }
+            if (t.starts_with("dtoverlay=vc4-kms-v3d")) {
+                // Lines under [pi4]/[pi5]/[cm4]/[cm5] are fine; anything
+                // else means it'll be active on this legacy Pi.
+                if (section != "[pi4]" && section != "[pi5]" &&
+                    section != "[cm4]" && section != "[cm5]") {
+                    hasUnscoped = true;
+                    break;
+                }
+            }
+        }
+    }
+    if (!hasUnscoped) return false;
+
+    // Comment out every uncommented dtoverlay=vc4-kms-v3d line. Sed-style
+    // replacement keeping leading whitespace.
+    std::vector<std::string> lines = split(cfg, '\n');
+    for (auto& ln : lines) {
+        size_t i = 0;
+        while (i < ln.size() && (ln[i] == ' ' || ln[i] == '\t')) i++;
+        if (ln.compare(i, 21, "dtoverlay=vc4-kms-v3d") == 0) {
+            ln = ln.substr(0, i) + "#" + ln.substr(i) +
+                 "  # FPP scoped vc4-kms-v3d to [pi4]/[pi5]";
+        }
+    }
+    std::string out;
+    for (size_t k = 0; k < lines.size(); k++) {
+        out += lines[k];
+        if (k + 1 < lines.size()) out += "\n";
+    }
+    out.append(
+        "\n# FPP: vc4-kms-v3d only on Pi 4 / Pi 5 / CM4 / CM5. Older Pis\n"
+        "# use the legacy firmware-driven HDMI / snd_bcm2835 path.\n"
+        "[pi4]\ndtoverlay=vc4-kms-v3d\n"
+        "[pi5]\ndtoverlay=vc4-kms-v3d\n"
+        "[cm4]\ndtoverlay=vc4-kms-v3d\n"
+        "[cm5]\ndtoverlay=vc4-kms-v3d\n"
+        "[all]\n");
+
+    std::string model = GetFileContents("/proc/device-tree/model");
+    TrimWhiteSpace(model);
+    printf("FPP - Pi model '%s' does not use vc4-kms-v3d; scoping it to Pi 4/5 in config.txt (reboot required)\n",
+           model.c_str());
+    PutFileContents(path, out);
     return true;
 }
 #endif
@@ -2494,11 +2595,15 @@ int main(int argc, char* argv[]) {
         createDirectories();
         printf("FPP - Directories created\n");
 #ifdef PLATFORM_PI
-        if (ensureCmdlineAudioParam()) {
-            printf("\n\nRebooting to apply audio kernel parameters.\n\n");
-            sync();
-            exec("/usr/sbin/reboot");
-            return 0;
+        {
+            bool changedCmdline = ensureCmdlineAudioParam();
+            bool changedConfig = ensureConfigVideoOverlay();
+            if (changedCmdline || changedConfig) {
+                printf("\n\nRebooting to apply HDMI audio/video boot configuration.\n\n");
+                sync();
+                exec("/usr/sbin/reboot");
+                return 0;
+            }
         }
 #endif
         bool needReboot = checkUnpartitionedSpace();
