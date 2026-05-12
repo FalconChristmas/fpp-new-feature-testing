@@ -1023,15 +1023,35 @@ EOF
 
         # snd_bcm2835 is loaded by Pi firmware via dtparam=audio=on before
         # userspace modprobe runs, so /etc/modprobe.d options don't apply.
-        # Kernel-command-line params do. enable_hdmi=0 drops the legacy
-        # HDMI audio device (vc4hdmi provides HDMI audio natively), so:
-        #   - "bcm2835 Headphones" becomes card 0 (restores FPP 9 layout)
-        #   - no duplicate HDMI ALSA entries
-        #   - aplay never hits the bcm2835 HDMI path, which on some
-        #     Pi4/Pi5 + monitor combinations re-trains the HDMI link and
-        #     briefly blanks the display.
-        echo "FPP - Updating SPI buffer size and audio device selection"
-        sed -i 's/$/ spidev.bufsiz=102400 snd_bcm2835.enable_headphones=1 snd_bcm2835.enable_hdmi=0/' ${BOOTDIR}/cmdline.txt
+        # Kernel-command-line params do.
+        #
+        # The enable_hdmi value is Pi-model dependent:
+        #   - Pi 4 / Pi 5 / CM4 / CM5: enable_hdmi=0
+        #       vc4hdmi (KMS) provides HDMI audio natively. Dropping the
+        #       legacy bcm2835 HDMI device keeps "bcm2835 Headphones" as
+        #       card 0 (FPP 9 layout), avoids duplicate HDMI ALSA entries,
+        #       and prevents the bcm2835 HDMI path from re-training the
+        #       HDMI link and briefly blanking the display on some
+        #       Pi4/Pi5 + monitor combinations.
+        #   - Pi Zero / Zero 2 W / Pi 1 / Pi 2 / Pi 3 / CM3: enable_hdmi=1
+        #       vc4hdmi audio is unreliable (or absent) on these SoCs, so
+        #       the legacy snd_bcm2835 HDMI device is the only working
+        #       HDMI audio path. Leaving it disabled means HDMI audio
+        #       simply doesn't work on these models (FPP issue #2018).
+        #
+        # MODEL is set at the top of this script from /proc/device-tree/model
+        # on the host running the installer. For chroot-based image builds
+        # the value reflects the build host (typically not a Pi), so we
+        # default to enable_hdmi=0 in that case and rely on FPPINIT's
+        # boot-time fixup to flip it on first boot of older hardware.
+        ENABLE_HDMI_AUDIO=0
+        case "$MODEL" in
+            *"Pi Zero"*|*"Pi 1"*|*"Pi 2"*|*"Pi 3"*|*"Compute Module 3"*)
+                ENABLE_HDMI_AUDIO=1
+                ;;
+        esac
+        echo "FPP - Updating SPI buffer size and audio device selection (enable_hdmi=${ENABLE_HDMI_AUDIO} for '${MODEL:-unknown}')"
+        sed -i "s/\$/ spidev.bufsiz=102400 snd_bcm2835.enable_headphones=1 snd_bcm2835.enable_hdmi=${ENABLE_HDMI_AUDIO}/" ${BOOTDIR}/cmdline.txt
 
         echo "FPP - Updating root partition device"
         sed -i 's/root=PARTUUID=[A-Fa-f0-9-]* /root=\/dev\/mmcblk0p2 /g' ${BOOTDIR}/cmdline.txt

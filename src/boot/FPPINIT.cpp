@@ -174,6 +174,53 @@ inline bool isPi5() {
 inline bool isPiZero2W() {
     return contains(GetFileContents("/proc/device-tree/model"), "Raspberry Pi Zero 2 W");
 }
+
+// Returns true if the running Pi needs the legacy snd_bcm2835 HDMI audio
+// device. Pi 4 / Pi 5 / CM4 / CM5 use vc4hdmi for HDMI audio and should keep
+// the legacy device disabled to avoid duplicate ALSA cards and HDMI link
+// re-training. Pi Zero / Zero 2 W / 1 / 2 / 3 / CM3 lack a reliable vc4hdmi
+// audio path, so the legacy device is the only working route.
+inline bool piNeedsLegacyHDMIAudio() {
+    const std::string m = GetFileContents("/proc/device-tree/model");
+    if (m.empty()) return false;
+    return contains(m, "Pi Zero")
+        || startsWith(m, "Raspberry Pi 1")
+        || startsWith(m, "Raspberry Pi Model")  // original Pi 1, no version in name
+        || startsWith(m, "Raspberry Pi 2")
+        || startsWith(m, "Raspberry Pi 3")
+        || contains(m, "Compute Module 3");
+}
+
+// Reconcile snd_bcm2835.enable_hdmi in cmdline.txt with what this Pi model
+// actually needs. Returns true if cmdline.txt was modified (caller must
+// reboot for the kernel parameter to take effect).
+//
+// This is the boot-time counterpart to FPP_Install.sh's enable_hdmi
+// selection: chroot-based image builds can't reliably read the target
+// model from /proc/device-tree/model (it reflects the build host), so
+// the installer's choice may be wrong for the first real boot. We only
+// touch cmdline.txt if the FPP-managed parameter is already present;
+// hand-built systems without it are left alone.
+static bool ensureCmdlineAudioParam() {
+    const std::string path = "/boot/firmware/cmdline.txt";
+    std::string cmdline = GetFileContents(path);
+    if (cmdline.empty()) return false;
+
+    bool wantHDMI = piNeedsLegacyHDMIAudio();
+    const std::string want = wantHDMI ? "snd_bcm2835.enable_hdmi=1" : "snd_bcm2835.enable_hdmi=0";
+    const std::string other = wantHDMI ? "snd_bcm2835.enable_hdmi=0" : "snd_bcm2835.enable_hdmi=1";
+
+    if (contains(cmdline, want)) return false;       // already correct
+    if (!contains(cmdline, other)) return false;     // not FPP-managed; leave alone
+
+    replaceAll(cmdline, other, want);
+    std::string model = GetFileContents("/proc/device-tree/model");
+    TrimWhiteSpace(model);
+    printf("FPP - Pi model '%s' requires %s; updating cmdline.txt (reboot required)\n",
+           model.c_str(), want.c_str());
+    PutFileContents(path, cmdline);
+    return true;
+}
 #endif
 
 static void modprobe(const char* mod) {
@@ -1678,6 +1725,15 @@ static void setupAudio() {
             }
         }
     }
+    // If ForceHDMI is set the user has told us to treat HDMI as always connected
+    // (e.g. a display or audio receiver that doesn't assert HPD on time).
+    // Respect that intent for audio routing too.
+    if (getRawSettingInt("ForceHDMI", 0)) {
+        anyHDMIConnected = true;
+        for (auto& [k, v] : hdmiStatus) {
+            v = true;
+        }
+    }
     if (!hasNonHDMI || contains(aplay, "no soundcards")) {
         printf("FPP - No Soundcard Detected, loading snd-dummy\n");
         modprobe("snd-dummy");
@@ -1687,17 +1743,18 @@ static void setupAudio() {
     bool found = false;
     int count = 0;
 
-    // Treat the selected card as unusable if it's any HDMI card (vc4hdmi OR
-    // legacy bcm2835 HDMI) with no display connected. Playing to an
-    // unconnected HDMI audio device panics the kernel on some Pis.
+    // Treat the selected card as unusable if it's a vc4hdmi card with no display
+    // connected — playing to an unconnected vc4hdmi device panics the kernel on
+    // some Pis.  Legacy snd_bcm2835 HDMI doesn't carry that risk, so always
+    // allow it; the user has explicitly enabled it via snd_bcm2835.enable_hdmi.
     auto cardIsDeadHDMI = [&](const std::string& k) {
         if (!lineHasHDMI(cardLines[k])) return false;
         if (cards[k].starts_with("vc4hdmi")) {
             return !hdmiStatus[cards[k]];
         }
-        // legacy bcm2835 HDMI shares the physical port; if any HDMI is
-        // connected, assume this device may work, otherwise treat as dead.
-        return !anyHDMIConnected;
+        // Legacy bcm2835 HDMI (snd_bcm2835 with enable_hdmi=1): the driver
+        // doesn't panic on an unconnected port, so honour the user's selection.
+        return false;
     };
 
     if (cardIsDeadHDMI(cstr)) {
@@ -2448,6 +2505,14 @@ int main(int argc, char* argv[]) {
         }
         createDirectories();
         printf("FPP - Directories created\n");
+#ifdef PLATFORM_PI
+        if (ensureCmdlineAudioParam()) {
+            printf("\n\nRebooting to apply audio kernel parameters.\n\n");
+            sync();
+            exec("/usr/sbin/reboot");
+            return 0;
+        }
+#endif
         bool needReboot = checkUnpartitionedSpace();
         checkSSHKeys();
         handleBootPartition();
