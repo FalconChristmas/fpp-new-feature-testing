@@ -175,49 +175,26 @@ inline bool isPiZero2W() {
     return contains(GetFileContents("/proc/device-tree/model"), "Raspberry Pi Zero 2 W");
 }
 
-// Returns true if the running Pi needs the legacy snd_bcm2835 HDMI audio
-// device. Pi 4 / Pi 5 / CM4 / CM5 use vc4hdmi for HDMI audio and should keep
-// the legacy device disabled to avoid duplicate ALSA cards and HDMI link
-// re-training. Pi Zero / Zero 2 W / 1 / 2 / 3 / CM3 lack a reliable vc4hdmi
-// audio path, so the legacy device is the only working route.
-inline bool piNeedsLegacyHDMIAudio() {
-    const std::string m = GetFileContents("/proc/device-tree/model");
-    if (m.empty()) return false;
-    return contains(m, "Pi Zero")
-        || startsWith(m, "Raspberry Pi 1")
-        || startsWith(m, "Raspberry Pi Model")  // original Pi 1, no version in name
-        || startsWith(m, "Raspberry Pi 2")
-        || startsWith(m, "Raspberry Pi 3")
-        || contains(m, "Compute Module 3");
-}
-
-// Reconcile snd_bcm2835.enable_hdmi in cmdline.txt with what this Pi model
-// actually needs. Returns true if cmdline.txt was modified (caller must
-// reboot for the kernel parameter to take effect).
+// Force snd_bcm2835.enable_hdmi=0 in cmdline.txt if an older FPP image set
+// it to =1. The legacy bcm2835 HDMI ALSA device conflicts with vc4-hdmi
+// (KMS): vc4-hdmi owns the HDMI hardware, so the legacy device silently
+// swallows audio. All modern Pi OS kernels expose vc4-hdmi on every
+// supported model, so the legacy device is never the right choice.
+// Returns true if cmdline.txt was modified (caller must reboot for the
+// kernel parameter to take effect).
 //
-// This is the boot-time counterpart to FPP_Install.sh's enable_hdmi
-// selection: chroot-based image builds can't reliably read the target
-// model from /proc/device-tree/model (it reflects the build host), so
-// the installer's choice may be wrong for the first real boot. We only
-// touch cmdline.txt if the FPP-managed parameter is already present;
-// hand-built systems without it are left alone.
+// Only touches cmdline.txt if the FPP-managed parameter is already
+// present; hand-built systems without it are left alone.
 static bool ensureCmdlineAudioParam() {
     const std::string path = "/boot/firmware/cmdline.txt";
     std::string cmdline = GetFileContents(path);
     if (cmdline.empty()) return false;
 
-    bool wantHDMI = piNeedsLegacyHDMIAudio();
-    const std::string want = wantHDMI ? "snd_bcm2835.enable_hdmi=1" : "snd_bcm2835.enable_hdmi=0";
-    const std::string other = wantHDMI ? "snd_bcm2835.enable_hdmi=0" : "snd_bcm2835.enable_hdmi=1";
+    if (contains(cmdline, "snd_bcm2835.enable_hdmi=0")) return false;  // already correct
+    if (!contains(cmdline, "snd_bcm2835.enable_hdmi=1")) return false; // not FPP-managed
 
-    if (contains(cmdline, want)) return false;       // already correct
-    if (!contains(cmdline, other)) return false;     // not FPP-managed; leave alone
-
-    replaceAll(cmdline, other, want);
-    std::string model = GetFileContents("/proc/device-tree/model");
-    TrimWhiteSpace(model);
-    printf("FPP - Pi model '%s' requires %s; updating cmdline.txt (reboot required)\n",
-           model.c_str(), want.c_str());
+    replaceAll(cmdline, "snd_bcm2835.enable_hdmi=1", "snd_bcm2835.enable_hdmi=0");
+    printf("FPP - Disabling legacy bcm2835 HDMI in cmdline.txt (vc4-hdmi owns HDMI audio); reboot required\n");
     PutFileContents(path, cmdline);
     return true;
 }
