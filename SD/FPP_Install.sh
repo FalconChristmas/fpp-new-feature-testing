@@ -1034,14 +1034,36 @@ dtparam=uart0=on
 gpu_mem=256
 [pi3]
 gpu_mem=128
+# Legacy firmware HDMI: hdmi_drive=2 selects HDMI mode (carries audio); the
+# default is DVI mode, which is silent. hdmi_force_hotplug=1 keeps the HDMI
+# clock running even when HPD isn't asserted (cheap extractors, displays
+# that don't pulse HPD on power-on, etc.). hdmi_force_edid_audio=1 tells
+# the firmware to advertise standard PCM regardless of what EDID claims.
+# These are only honoured when vc4-kms-v3d is NOT loaded (which is true on
+# legacy Pis once FPP has scoped the overlay to Pi 4/5 only).
+hdmi_drive=2
+hdmi_force_hotplug=1
+hdmi_force_edid_audio=1
 [pi0]
 gpu_mem=64
+hdmi_drive=2
+hdmi_force_hotplug=1
+hdmi_force_edid_audio=1
 [pi02]
 gpu_mem=128
+hdmi_drive=2
+hdmi_force_hotplug=1
+hdmi_force_edid_audio=1
 [pi1]
 gpu_mem=64
+hdmi_drive=2
+hdmi_force_hotplug=1
+hdmi_force_edid_audio=1
 [pi2]
 gpu_mem=64
+hdmi_drive=2
+hdmi_force_hotplug=1
+hdmi_force_edid_audio=1
 
 [all]
 

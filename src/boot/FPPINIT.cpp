@@ -299,6 +299,49 @@ static bool ensureConfigVideoOverlay() {
     PutFileContents(path, out);
     return true;
 }
+
+// Ensure legacy firmware HDMI mode flags are set in config.txt for older
+// Pis. Without these, even with snd_bcm2835.enable_hdmi=1 and the ALSA
+// card present, the firmware drives HDMI in DVI mode (video only) so
+// audio is silently dropped on the line.
+//
+//   hdmi_drive=2              HDMI mode (carries audio) instead of DVI
+//   hdmi_force_hotplug=1      keep HDMI clock alive when HPD isn't asserted
+//   hdmi_force_edid_audio=1   advertise PCM audio regardless of EDID
+//
+// These are only honoured when vc4-kms-v3d is NOT loaded, which on FPP
+// images is the case for legacy Pi models. Returns true if config.txt
+// was modified.
+static bool ensureLegacyHDMIFlags() {
+    if (!piNeedsLegacyHDMIAudio()) return false;
+
+    const std::string path = "/boot/firmware/config.txt";
+    std::string cfg = GetFileContents(path);
+    if (cfg.empty()) return false;
+
+    if (contains(cfg, "# FPP legacy HDMI flags")) return false;  // already done
+    // If hdmi_drive=2 is already present anywhere (user or installer set it),
+    // assume the firmware HDMI mode is already configured and leave alone.
+    if (contains(cfg, "hdmi_drive=2")) return false;
+
+    cfg.append(
+        "\n# FPP legacy HDMI flags: legacy firmware HDMI path needs these to\n"
+        "# emit audio on the HDMI line. Only legacy Pi sections; Pi 4/5 use\n"
+        "# vc4-kms-v3d (KMS) and ignore these.\n"
+        "[pi0]\nhdmi_drive=2\nhdmi_force_hotplug=1\nhdmi_force_edid_audio=1\n"
+        "[pi02]\nhdmi_drive=2\nhdmi_force_hotplug=1\nhdmi_force_edid_audio=1\n"
+        "[pi1]\nhdmi_drive=2\nhdmi_force_hotplug=1\nhdmi_force_edid_audio=1\n"
+        "[pi2]\nhdmi_drive=2\nhdmi_force_hotplug=1\nhdmi_force_edid_audio=1\n"
+        "[pi3]\nhdmi_drive=2\nhdmi_force_hotplug=1\nhdmi_force_edid_audio=1\n"
+        "[all]\n");
+
+    std::string model = GetFileContents("/proc/device-tree/model");
+    TrimWhiteSpace(model);
+    printf("FPP - Pi model '%s' needs legacy firmware HDMI flags; adding to config.txt (reboot required)\n",
+           model.c_str());
+    PutFileContents(path, cfg);
+    return true;
+}
 #endif
 
 static void modprobe(const char* mod) {
@@ -2598,7 +2641,8 @@ int main(int argc, char* argv[]) {
         {
             bool changedCmdline = ensureCmdlineAudioParam();
             bool changedConfig = ensureConfigVideoOverlay();
-            if (changedCmdline || changedConfig) {
+            bool changedHDMI = ensureLegacyHDMIFlags();
+            if (changedCmdline || changedConfig || changedHDMI) {
                 printf("\n\nRebooting to apply HDMI audio/video boot configuration.\n\n");
                 sync();
                 exec("/usr/sbin/reboot");
