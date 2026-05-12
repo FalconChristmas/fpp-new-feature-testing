@@ -1778,6 +1778,17 @@ static void setupAudio() {
             setRawSetting("AudioOutput", std::to_string(card));
         }
     }
+    // If the card was already listed by the initial aplay scan it is ready.
+    // Only run the amixer retry loop for cards that may still be initialising
+    // (e.g. USB audio appearing asynchronously).
+    // Note: amixer cset numid=3 is the bcm2835-ALSA combined card's output
+    // route selector; cards that don't have that control (e.g. the
+    // bcm2835 HDMI-only card exposed via snd_bcm2835.enable_hdmi=1)
+    // return "Invalid " and would otherwise cause a spurious 10-second
+    // wait and then a forced fallback to card 0.
+    if (cards.count(cstr)) {
+        found = true;
+    }
     while (!found && count < 50) {
         std::string amixer = execAndReturn("/usr/bin/amixer -c " + std::to_string(card) + " cset numid=3 1  2>&1");
         if (contains(amixer, "Invalid ")) {

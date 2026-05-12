@@ -307,6 +307,12 @@ static bool IsHDMIOut(std::string& vOut) {
         vOut = "HDMI-A-1";
     }
     if (vOut.starts_with("HDMI-") || vOut.starts_with("DSI-") || vOut.starts_with("Composite-")) {
+        // ForceHDMI tells FPP the display is always present (HPD not asserted,
+        // display off at boot, audio-only HDMI receiver, etc.). Respect it so
+        // HDMI output is used even when DRM reports "disconnected".
+        if (getSettingInt("ForceHDMI", 0)) {
+            return true;
+        }
         for (int x = 0; x < 4; x++) {
             std::string conn = "/sys/class/drm/card" + std::to_string(x) + "-" + vOut + "/status";
             if (FileExists(conn)) {
