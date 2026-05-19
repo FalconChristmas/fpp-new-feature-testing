@@ -17,14 +17,14 @@
     <script type="text/javascript" src="js/FileSaver.min.js" async></script>
 
     <title><? echo $pageTitle; ?></title>
+    <!-- TODO: extract to www/css/multisync.css when ready to split into external files -->
     <style>
+        /* === Action options === */
         .actionOptions {
             display: none;
         }
-    </style>
 
-
-    <style>
+        /* === Channel I/O popover === */
         .channel-io-icons {
             display: inline-block;
             margin-left: 4px;
@@ -80,7 +80,7 @@
             overflow-y: auto;
         }
 
-        /*** Bootstrap popover ***/
+        /* === Bootstrap popover (column selector target) === */
         #popover-target label {
             margin: 0 5px;
             display: block;
@@ -94,7 +94,8 @@
             color: var(--fpp-text-light);
         }
 
-        /* Bootstrap Table sort icons for #fppSystemsTable — structural/theming in fpp.css/fpp-dark.css */
+        /* === Table sort icons === */
+        /* structural/theming counterparts live in fpp.css / fpp-dark.css */
         #fppSystemsTable thead th .both {
             background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><path fill="%23888" d="m103.05877,41.4c9.37707,-12.5 24.60541,-12.5 33.98248,0l96.02113,128c6.90152,9.2 8.92696,22.9 5.17614,34.9s-12.45274,19.8 -22.20489,19.8l-192.04225,-0.1c-9.67713,0 -18.45406,-7.8 -22.20489,-19.8s-1.65036,-25.7 5.17614,-34.9l96.02113,-128l0.07501,0.1z"/><path fill="%23888" d="m103.05877,470.7l-96.02113,-128c-6.90152,-9.2 -8.92696,-22.9 -5.17614,-34.9s12.45274,-19.8 22.20489,-19.8l192.04225,0c9.67713,0 18.45406,7.8 22.20489,19.8s1.65036,25.7 -5.17614,34.9l-96.02113,128c-9.37707,12.5 -24.60541,12.5 -33.98248,0l-0.07501,0z"/></svg>');
         }
@@ -108,6 +109,7 @@
             background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><path fill="%23ccc" d="m103.05877,41.4c9.37707,-12.5 24.60541,-12.5 33.98248,0l96.02113,128c6.90152,9.2 8.92696,22.9 5.17614,34.9s-12.45274,19.8 -22.20489,19.8l-192.04225,-0.1c-9.67713,0 -18.45406,-7.8 -22.20489,-19.8s-1.65036,-25.7 5.17614,-34.9l96.02113,-128l0.07501,0.1z"/><path fill="%230d47a1" d="m103.05877,470.7l-96.02113,-128c-6.90152,-9.2 -8.92696,-22.9 -5.17614,-34.9s12.45274,-19.8 22.20489,-19.8l192.04225,0c9.67713,0 18.45406,7.8 22.20489,19.8s1.65036,25.7 -5.17614,34.9l-96.02113,128c-9.37707,12.5 -24.60541,12.5 -33.98248,0l-0.07501,0z"/></svg>');
         }
 
+        /* === Column selector === */
         #columnSelector input[type="checkbox"] {
             margin-right: 8px;
             margin-bottom: 2px;
@@ -127,7 +129,7 @@
             margin-top: -8px;
         }
 
-        /* Drag-and-drop reorder mode */
+        /* === Drag-and-drop reorder mode === */
         .reorder-grip {
             display: none;
             cursor: grab;
@@ -156,6 +158,15 @@
             height: 2.5em;
         }
     </style>
+
+    <script>
+        window.fppConfig = {
+            hideExternalURLs: <?= json_encode((bool)$settings['hideExternalURLs']) ?>,
+            uiLevel: <?= json_encode((int)$uiLevel) ?>,
+            serverName: <?= json_encode($_SERVER['SERVER_NAME'] ?? '') ?>,
+            serverAddr: <?= json_encode($_SERVER['SERVER_ADDR'] ?? '') ?>
+        };
+    </script>
 
     <script>
         var hostRows = new Object();
@@ -1155,25 +1166,17 @@
                 (data.advancedView.RemoteGitVersion !== data.advancedView.LocalGitVersion)) {
                 updatesAvailable = 1;
             }
-            <? if (!$settings['hideExternalURLs']) { ?>
-                var localVer = "<a target='host_" + ip + "' href='" + wrapUrlWithProxy(ip, '/about.php') + "' target='_blank' data-ip='" + ip + "'>";
-            <? } else { ?>
-                var localVer = "";
-            <? } ?>
-            localVer += "<b><font color='";
-            if (updatesAvailable) {
-                localVer += 'text-warning';
-            } else if ((typeof (data.advancedView.RemoteGitVersion) !== 'undefined') &&
-                (data.advancedView.RemoteGitVersion == data.advancedView.LocalGitVersion)) {
-                localVer += 'text-success';
-            } else {
-                // Unknown or can't tell if up to date or not for some reason
-                localVer += 'text-info';
-            }
-            localVer += "'>" + data.advancedView.LocalGitVersion + "</font></b>";
-            <? if (!$settings['hideExternalURLs']) { ?>
+            var localVer = fppConfig.hideExternalURLs ? ""
+                : "<a target='host_" + ip + "' href='" + wrapUrlWithProxy(ip, '/about.php') + "' target='_blank' data-ip='" + ip + "'>";
+            var colorClass = updatesAvailable ? 'text-warning'
+                : ((typeof (data.advancedView.RemoteGitVersion) !== 'undefined') &&
+                    (data.advancedView.RemoteGitVersion == data.advancedView.LocalGitVersion))
+                    ? 'text-success'
+                    : 'text-muted';
+            localVer += "<span class='fw-bold " + colorClass + "'>" + data.advancedView.LocalGitVersion + "</span>";
+            if (!fppConfig.hideExternalURLs) {
                 localVer += "</a>";
-            <? } ?>
+            }
 
             return localVer;
         }
@@ -1258,7 +1261,7 @@
                             unavailables[ip]++;
                             status = "unreachable";
                         } else if (data.status_name == 'password') {
-                            status = '<font color="red">Protected</font>';
+                            status = '<span class="text-danger">Protected</span>';
                         } else if (data.status_name == 'unknown') {
                             status = '-';
                         } else if (data.status_name == 'idle') {
@@ -1289,11 +1292,11 @@
                         }
 
                         if (data.rebootFlag == 1) {
-                            status += "<br><i class=\"fas fa-exclamation-triangle\" style=\"color: red;\"></i><span class='warning-text'>Device Reboot Required</span>";
+                            status += "<br><i class=\"fas fa-exclamation-triangle text-danger\"></i><span class='warning-text'>Device Reboot Required</span>";
                         }
 
                         if (data.restartFlag == 1) {
-                            status += "<br><i class=\"fas fa-exclamation-triangle\" style=\"color: orange;\"></i><span class='warning-text'>FPPD Restart Required</span>";
+                            status += "<br><i class=\"fas fa-exclamation-triangle text-warning\"></i><span class='warning-text'>FPPD Restart Required</span>";
                         }
 
                         var rowID = "fpp_" + ip.replace(/\./g, '_');
@@ -1572,11 +1575,10 @@
         } // end of "api/system/status?ip=" + ips
 
         function ipLink(ip) {
-            <? if ($settings['hideExternalURLs']) { ?>
-                    return ip;
-            <? } else { ?>
-                    return "<a target='host_" + ip + "' href='" + wrapUrlWithProxy(ip, "/") + "' data-ip='" + ip + "'>" + ip + "</a>";
-            <? } ?>
+            if (fppConfig.hideExternalURLs) {
+                return ip;
+            }
+            return "<a target='host_" + ip + "' href='" + wrapUrlWithProxy(ip, "/") + "' data-ip='" + ip + "'>" + ip + "</a>";
         }
 
         function parseFPPSystems(data) {
@@ -1673,7 +1675,7 @@
 
                 var hnSpanStyle = "";
                 if (data[i].local) {
-                    hnSpanStyle = " style='font-weight:bold;'";
+                    hnSpanStyle = " class='fw-bold'";
                 } else {
                     if ((settings['MultiSyncEnabled'] == '1') &&
                         (settings['fppMode'] == 'player') &&
@@ -1726,14 +1728,9 @@
                     if ((data[i].fppModeString == 'remote') && (star != ""))
                         ipTxt = "<small>Select IPs for Unicast Sync</small><br>" + ipTxt + star;
 
-                    <? if ($settings['hideExternalURLs']) { ?>
-                            var hostTxt = hostname;
-                    <? } else { ?>
-                            var hostTxt = data[i].local ? hostname : "<a target='host_" + data[i].address + "' href='" + wrapUrlWithProxy(data[i].address, "/") + "'>" + hostname + "</a>";
-                            if (data[i].address == hostname) {
-                                hostTxt = hostname;
-                            }
-                    <? } ?>
+                    var hostTxt = (fppConfig.hideExternalURLs || data[i].local || data[i].address == hostname)
+                        ? hostname
+                        : "<a target='host_" + data[i].address + "' href='" + wrapUrlWithProxy(data[i].address, "/") + "'>" + hostname + "</a>";
 
 
                     var newRow = "<tr id='" + rowID + "' data-ip='" + data[i].address + "' data-iplist='" + data[i].address + "' class='systemRow'>" +
@@ -1840,16 +1837,12 @@
             settings['MultiSyncExtraRemotes'] = extras;
 
             if (extras != '' && origExtra != extras) {
-                <?php
-                if ($uiLevel >= 1) {
-                    ?>
-                        var inp = document.getElementById("MultiSyncExtraRemotes");
-                        if (inp) {
-                            $('#MultiSyncExtraRemotes').val(extras);
-                        }
-                        <?
+                if (fppConfig.uiLevel >= 1) {
+                    var inp = document.getElementById("MultiSyncExtraRemotes");
+                    if (inp) {
+                        $('#MultiSyncExtraRemotes').val(extras);
+                    }
                 }
-                ?>
                 SetSetting("MultiSyncExtraRemotes", extras, 0, 0);
             }
 
@@ -2199,14 +2192,13 @@
 
 
         function wrapUrlWithProxy(ip, path) {
-            <? if (!$settings['hideExternalURLs']) { ?>
-                    if (isProxied(ip)) {
-                        return 'proxy/' + ip + path;
-                    }
-                    return 'http://' + ip + path;
-            <? } else { ?>
-                    return "";
-            <? } ?>
+            if (fppConfig.hideExternalURLs) {
+                return "";
+            }
+            if (isProxied(ip)) {
+                return 'proxy/' + ip + path;
+            }
+            return 'http://' + ip + path;
         }
 
         function getFalconControllerStatus(fv3ips, fv4ips, refreshing = false) {
@@ -2658,16 +2650,17 @@
             return ip;
         }
         function ipOrHostnameFromRowID(id) {
-            <? if ($_SERVER['SERVER_NAME'] != $_SERVER['SERVER_ADDR']) { ?>
-                    // Hitting the FPP instance via Hostname, not Ip address.  Thus, we need to use
-                    // hostnames for the remotes as well or CORS will trigger
-                    var ip = $('#' + id + "_hostname").html();
-                    if (ip == "") {
-                        ip = $('#' + id).attr('data-ip');
-                    }
-            <? } else { ?>
-                    var ip = $('#' + id).attr('data-ip');
-            <? } ?>
+            var ip;
+            if (fppConfig.serverName !== fppConfig.serverAddr) {
+                // Hitting the FPP instance via hostname, not IP; use hostnames
+                // for remotes as well or CORS will trigger.
+                ip = $('#' + id + "_hostname").html();
+                if (ip == "") {
+                    ip = $('#' + id).attr('data-ip');
+                }
+            } else {
+                ip = $('#' + id).attr('data-ip');
+            }
             return ip;
         }
 
