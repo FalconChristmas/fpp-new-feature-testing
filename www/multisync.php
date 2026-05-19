@@ -1425,7 +1425,6 @@
                                 u += "<tr><td>Local:</td><td id='" + rowID + "_localgitvers'>";
                                 u += getLocalVersionLink(ip, data);
                                 u += "</td></tr>" +
-                                    "<tr><td>Remote:</td><td id='" + rowID + "_remotegitvers'>" + data.advancedView.RemoteGitVersion + "</td></tr>" +
                                     "<tr><td>Branch:</td><td id='" + rowID + "_gitbranch'>" + data.advancedView.Branch + "</td></tr>";
 
                                 if ((typeof (data.advancedView.UpgradeSource) !== 'undefined') &&
