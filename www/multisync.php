@@ -160,6 +160,7 @@
     </style>
 
     <script>
+        // Migrate some inline php code to javascript to enhance readability
         window.fppConfig = {
             hideExternalURLs: <?= json_encode((bool)$settings['hideExternalURLs']) ?>,
             uiLevel: <?= json_encode((int)$uiLevel) ?>,
@@ -172,7 +173,6 @@
     <script>
         // ============================================================
         // SECTION: Config / globals
-        // Future file: www/js/multisync/config.js
         // ============================================================
 
         var hostRows = new Object();
@@ -253,7 +253,6 @@
 
         // ============================================================
         // SECTION: Device type classifiers
-        // Future file: www/js/multisync/types.js
         // ============================================================
 
         // Lookup sets for each device category.
@@ -309,7 +308,6 @@
 
         // ============================================================
         // SECTION: Utilities
-        // Future file: www/js/multisync/utils.js
         // ============================================================
 
         /*
@@ -388,7 +386,6 @@
 
         // ============================================================
         // SECTION: Network helpers
-        // Future file: www/js/multisync/network.js
         // ============================================================
 
         function IPsCanTalk(ip1, ip2, octets) {
@@ -455,7 +452,6 @@
 
         // ============================================================
         // SECTION: Channel I/O
-        // Future file: www/js/multisync/channel-io.js
         // ============================================================
 
         function getUniverseTypeName(typeId) {
@@ -671,7 +667,6 @@
 
         // ============================================================
         // SECTION: Display order
-        // Future file: www/js/multisync/display-order.js
         // ============================================================
 
         /**
@@ -868,7 +863,6 @@
 
         // ============================================================
         // SECTION: HTML renderers
-        // Future file: www/js/multisync/render.js
         // ============================================================
 
         /*
@@ -917,7 +911,7 @@
             }
             var localVer = fppConfig.hideExternalURLs ? ""
                 : "<a target='host_" + ip + "' href='" + wrapUrlWithProxy(ip, '/about.php') + "' target='_blank' data-ip='" + ip + "'>";
-            var colorClass = updatesAvailable ? 'text-warning'
+            var colorClass = updatesAvailable ? 'text-danger'
                 : ((typeof (data.advancedView.RemoteGitVersion) !== 'undefined') &&
                     (data.advancedView.RemoteGitVersion == data.advancedView.LocalGitVersion))
                     ? 'text-success'
@@ -932,7 +926,6 @@
 
         // ============================================================
         // SECTION: FPP system polling
-        // Future file: www/js/multisync/polling.js
         // ============================================================
 
         async function getFPPSystemStatus(ipAddresses, refreshing = false) {
@@ -1774,7 +1767,6 @@
 
         // ============================================================
         // SECTION: ESPixelStick polling
-        // Future file: www/js/multisync/polling.js
         // ============================================================
 
         var ESPSockets = {};
@@ -1923,7 +1915,6 @@
 
         // ============================================================
         // SECTION: Falcon polling
-        // Future file: www/js/multisync/polling.js
         // ============================================================
 
         async function getFalconControllerStatus(fv3ips, fv4ips, refreshing = false) {
@@ -2049,7 +2040,6 @@
 
         // ============================================================
         // SECTION: WLED polling
-        // Future file: www/js/multisync/polling.js
         // ============================================================
 
         async function getWLEDControllerStatus(ipAddresses, refreshing = false) {
@@ -2108,7 +2098,6 @@
 
         // ============================================================
         // SECTION: Genius polling
-        // Future file: www/js/multisync/polling.js
         // ============================================================
 
         async function getGeniusControllerStatus(ipAddresses, refreshing = false) {
@@ -2167,7 +2156,6 @@
 
         // ============================================================
         // SECTION: Baldrick polling
-        // Future file: www/js/multisync/polling.js
         // ============================================================
 
         async function getBaldrickControllerStatus(ipAddresses, refreshing = false) {
@@ -2246,7 +2234,6 @@
 
         // ============================================================
         // SECTION: Refresh orchestration
-        // Future file: www/js/multisync/polling.js
         // ============================================================
 
         function clearRefreshTimers() {
@@ -2349,7 +2336,6 @@
 
         // ============================================================
         // SECTION: OS upgrade helpers
-        // Future file: www/js/multisync/actions.js
         // ============================================================
 
         async function getLocalFpposFiles() {
@@ -2539,7 +2525,6 @@
 
         // ============================================================
         // SECTION: Stream / upgrade actions
-        // Future file: www/js/multisync/actions.js
         // ============================================================
 
         function EnableDisableStreamButtons() {
@@ -2743,7 +2728,6 @@
 
         // ============================================================
         // SECTION: System actions
-        // Future file: www/js/multisync/actions.js
         // ============================================================
 
         function actionDone(id) {
@@ -2869,7 +2853,6 @@
 
         // ============================================================
         // SECTION: Git / branch actions
-        // Future file: www/js/multisync/actions.js
         // ============================================================
 
         function changeBranch(rowID) {
@@ -2909,7 +2892,6 @@
 
         // ============================================================
         // SECTION: File copy actions
-        // Future file: www/js/multisync/actions.js
         // ============================================================
 
         function copyFilesToSystem(rowID) {
@@ -3057,7 +3039,6 @@
 
         // ============================================================
         // SECTION: Proxy actions
-        // Future file: www/js/multisync/actions.js
         // ============================================================
 
         async function addProxyForIP(rowID) {
@@ -3086,7 +3067,6 @@
 
         // ============================================================
         // SECTION: Selection helpers
-        // Future file: www/js/multisync/actions.js
         // ============================================================
 
         function clearSelected() {
@@ -3124,7 +3104,6 @@
 
         // ============================================================
         // SECTION: MultiSync settings
-        // Future file: www/js/multisync/actions.js
         // ============================================================
 
         // Updates the warning information for multi-sync
@@ -3272,7 +3251,6 @@
 
         // ============================================================
         // SECTION: Multi-action dispatch
-        // Future file: www/js/multisync/actions.js
         // ============================================================
 
         async function triggerCSPBashScript() {
