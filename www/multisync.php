@@ -168,7 +168,13 @@
         };
     </script>
 
+    <!-- TODO: when ready to add a build step, extract each section to its listed future file -->
     <script>
+        // ============================================================
+        // SECTION: Config / globals
+        // Future file: www/js/multisync/config.js
+        // ============================================================
+
         var hostRows = new Object();
         var rowSpans = new Object();
         var systemStatusCache = {}; // Cache of api/system/status?ip[]=
@@ -195,248 +201,96 @@
         }
         ?>;
 
-        /**
-         * Returns a stable identifier for a system.
-         * Uses UUID for FPP systems (most stable across IP/hostname changes),
-         * falls back to hostname for non-FPP or systems without UUID.
-         */
-        function getSystemIdentifier(system) {
-            if (system.uuid && system.uuid !== '' && system.uuid !== 'Unknown') {
-                return 'uuid:' + system.uuid;
-            }
-            return 'host:' + (system.hostname || system.address);
-        }
+        var ipRows = new Object();
 
-        /**
-         * Sorts a systems data array based on the saved display order.
-         * Systems matching saved identifiers appear first in saved order,
-         * unknown systems are appended at the end sorted by hostname.
-         */
-        function applySavedDisplayOrder(data, order) {
-            if (!order || order.length === 0) return data;
+        var refreshTimer = null;
+        var geniusRefreshTimer = null;
+        var wledRefreshTimer = null;
+        var baldrickRefreshTimer = null;
+        var falconRefreshTimer = null;
 
-            var orderMap = {};
-            for (var i = 0; i < order.length; i++) {
-                orderMap[order[i]] = i;
-            }
-
-            var sorted = data.slice(); // clone to avoid mutating original
-            sorted.sort(function (a, b) {
-                var idA = getSystemIdentifier(a);
-                var idB = getSystemIdentifier(b);
-                var posA = orderMap.hasOwnProperty(idA) ? orderMap[idA] : 99999;
-                var posB = orderMap.hasOwnProperty(idB) ? orderMap[idB] : 99999;
-                if (posA !== posB) return posA - posB;
-                // For systems not in saved order, sort by hostname
-                return (a.hostname || a.address).localeCompare(b.hostname || b.address);
-            });
-            return sorted;
-        }
-
-        /**
-         * Saves the current visible table row order as the display order.
-         * Captures system identifiers from the current DOM order (which reflects
-         * any column sort the user has applied).
-         */
-        function saveDisplayOrder() {
-            var order = [];
-            var seen = {};
-            $('#fppSystems tr.systemRow').each(function () {
-                var ipList = $(this).attr('data-iplist');
-                if (!ipList) return;
-                var primaryIp = ipList.split(',')[0];
-                for (var i = 0; i < systemsList.length; i++) {
-                    if (systemsList[i].address === primaryIp) {
-                        var id = getSystemIdentifier(systemsList[i]);
-                        if (!seen[id]) {
-                            order.push(id);
-                            seen[id] = true;
-                        }
-                        break;
-                    }
-                }
-            });
-
-            if (order.length === 0) {
-                $.jGrowl('No systems to save order for.', { themeState: 'detract' });
-                return;
-            }
-
-            savedDisplayOrder = order;
-            // Store as pipe-delimited string to avoid JSON-in-INI quoting issues
-            SetSetting('MultiSyncDisplayOrder', order.join('|'), 0, 0);
-
-            // Clear sort so our custom order takes effect on next load
-            $('#fppSystemsTable').bootstrapTable('sortReset');
-
-            updateDisplayOrderButtons();
-
-            // Exit reorder mode if active
-            if (reorderModeActive) {
-                toggleReorderMode();
-            }
-
-            $.jGrowl('Display order saved.', { themeState: 'success' });
-        }
-
-        /**
-         * Clears the saved display order and refreshes the system list.
-         */
-        function clearDisplayOrder() {
-            savedDisplayOrder = [];
-            SetSetting('MultiSyncDisplayOrder', '', 0, 0);
-            updateDisplayOrderButtons();
-
-            // Exit reorder mode if active
-            if (reorderModeActive) {
-                toggleReorderMode();
-            }
-
-            $.jGrowl('Display order cleared.', { themeState: 'success' });
-            getFPPSystems();
-        }
-
-        /**
-         * Re-applies the saved display order by re-parsing the systems list.
-         * Useful when user has sorted by a column and wants to return to saved order.
-         */
-        function sortBySavedOrder() {
-            if (!savedDisplayOrder || savedDisplayOrder.length === 0) {
-                $.jGrowl('No saved display order.', { themeState: 'detract' });
-                return;
-            }
-            parseFPPSystems(systemsList);
-            // Clear sort to preserve our DOM order
-            $('#fppSystemsTable').bootstrapTable('sortReset');
-        }
-
-        /**
-         * Updates visibility and text of display order buttons based on current state.
-         */
-        function updateDisplayOrderButtons() {
-            if (savedDisplayOrder && savedDisplayOrder.length > 0) {
-                $('#clearDisplayOrderBtn').show();
-                $('#sortBySavedOrderBtn').show();
-                $('#saveDisplayOrderBtn').html('<i class="fas fa-save"></i> Update Display Order');
-            } else {
-                $('#clearDisplayOrderBtn').hide();
-                $('#sortBySavedOrderBtn').hide();
-                $('#saveDisplayOrderBtn').html('<i class="fas fa-save"></i> Save Display Order');
-            }
-        }
-
+        var unavailables = [];
         var reorderModeActive = false;
 
-        /**
-         * Toggles reorder mode on/off.
-         * When enabled: adds drag handles, enables jQuery UI sortable on tbody,
-         * disables column sorting.
-         * When disabled: removes sortable, re-enables sorting.
-         */
-        function toggleReorderMode() {
-            reorderModeActive = !reorderModeActive;
-            var $table = $('#fppSystemsTable');
-            var $tbody = $('#fppSystems');
+        var channelOutputConfigCache = {};
+        var channelInputConfigCache = {};
 
-            if (reorderModeActive) {
-                $table.addClass('reorder-mode');
-                $('#reorderModeBtn').html('<i class="fas fa-arrows-alt"></i> Exit Reorder Mode').removeClass('btn-secondary').addClass('btn-warning');
-                $('#saveDisplayOrderBtn').show();
+        // Universe type ID to display name mapping
+        const universeTypeNames = {
+            0: 'E1.31 Multicast',
+            1: 'E1.31 Unicast',
+            2: 'ArtNet Broadcast',
+            3: 'ArtNet Unicast',
+            4: 'DDP Raw',
+            5: 'DDP',
+            6: 'KiNet v1',
+            7: 'KiNet v2',
+            8: 'Twinkly',
+            9: 'ArtNet Unicast'
+        };
 
-                // Disable header click sorting
-                $table.find('th').css('pointer-events', 'none');
-                // Disable filter inputs
-                $table.find('.filter-control input, .filter-control select').prop('disabled', true);
+        var streamCount = 0;
 
-                // Enable jQuery UI sortable on tbody
-                $tbody.sortable({
-                    items: '> tr.systemRow',
-                    handle: '.reorder-grip',
-                    axis: 'y',
-                    tolerance: 'pointer',
-                    helper: function (e, tr) {
-                        // Preserve column widths while dragging
-                        var $originals = tr.children();
-                        var $helper = tr.clone();
-                        $helper.children().each(function (index) {
-                            $(this).width($originals.eq(index).outerWidth());
-                        });
-                        return $helper;
-                    },
-                    start: function (event, ui) {
-                        // Hide child rows (warnings, logs) during drag
-                        var rowID = ui.item.attr('id');
-                        $('#' + rowID + '_warnings, #' + rowID + '_logs').hide();
-                    },
-                    stop: function (event, ui) {
-                        var rowID = ui.item.attr('id');
-                        rowSpanSet(rowID);
-                    }
-                });
-            } else {
-                $table.removeClass('reorder-mode');
-                $('#reorderModeBtn').html('<i class="fas fa-arrows-alt"></i> Reorder Systems').removeClass('btn-warning').addClass('btn-secondary');
+        // ============================================================
+        // SECTION: Device type classifiers
+        // Future file: www/js/multisync/types.js
+        // ============================================================
 
-                // Destroy sortable
-                if ($tbody.sortable('instance')) {
-                    $tbody.sortable('destroy');
-                }
+        // Lookup sets for each device category.
+        // Range-based categories are generated programmatically to keep
+        // this readable while remaining identical in behavior to the
+        // original switch/if-chain implementations.
+        const DEVICE_TYPE_SETS = {
+            // 0x01–0x7F  (typeId >= 1 && typeId < 128)
+            FPP:           new Set(Array.from({ length: 127 }, function (_, i) { return i + 1; })),
+            // 0x02–0x3F  (typeId >= 2 && typeId <= 63)
+            FPP_PI:        new Set(Array.from({ length: 62 },  function (_, i) { return i + 2; })),
+            // 0x41–0x5F  (typeId >= 65 && typeId <= 95)
+            FPP_BEAGLEBONE: new Set(Array.from({ length: 31 }, function (_, i) { return i + 65; })),
+            // 0x70 = 112
+            FPP_MAC:       new Set([0x70]),
+            // 0x60 = 96
+            FPP_ARMBIAN:   new Set([0x60]),
+            // 0x00 = 0
+            UNKNOWN:       new Set([0x00]),
+            // 0x80–0x87  (128–135)
+            FALCON:        new Set(Array.from({ length: 8 },   function (_, i) { return i + 0x80; })),
+            // 0x88–0x8F  (136–143)
+            FALCON_V4:     new Set(Array.from({ length: 8 },   function (_, i) { return i + 0x88; })),
+            // 0xC2, 0xC3  (194, 195)
+            ESPIXELSTICK:  new Set([0xC2, 0xC3]),
+            // 0xFF = 255
+            SANDEVICES:    new Set([0xFF]),
+            // 0xA0–0xAF  (160–175)
+            GENIUS:        new Set(Array.from({ length: 16 },  function (_, i) { return i + 0xA0; })),
+            // 0xFB = 251
+            WLED:          new Set([0xFB]),
+            // 0xC4 = 196
+            BALDRICK:      new Set([0xC4]),
+        };
 
-                // Re-enable header click sorting
-                $table.find('th').css('pointer-events', '');
-                // Re-enable filter inputs
-                $table.find('.filter-control input, .filter-control select').prop('disabled', false);
-            }
+        function isDeviceType(typeId, category) {
+            return DEVICE_TYPE_SETS[category]?.has(parseInt(typeId)) ?? false;
         }
 
-        function getLocalFpposFiles() {
-            $.get('api/files/uploads', function (data) {
-                if (data.hasOwnProperty("files")) {
-                    data.files.forEach(function (f) {
-                        if (f.hasOwnProperty("name")) {
-                            if (f.name.endsWith(".fppos")) {
-                                let type = "UNKNOWN";
-                                if (f.name.startsWith("BBB-")) {
-                                    type = "BBB";
-                                } else if (f.name.startsWith("BB64-")) {
-                                    type = "BB64";
-                                } else if (f.name.startsWith("Pi-")) {
-                                    type = "PI";
-                                }
+        function isFPP(typeId)            { return isDeviceType(typeId, 'FPP'); }
+        function isFPPPi(typeId)          { return isDeviceType(typeId, 'FPP_PI'); }
+        function isFPPBeagleBone(typeId)  { return isDeviceType(typeId, 'FPP_BEAGLEBONE'); }
+        function isFPPMac(typeId)         { return isDeviceType(typeId, 'FPP_MAC'); }
+        function isFPPArmbian(typeId)     { return isDeviceType(typeId, 'FPP_ARMBIAN'); }
+        function isUnknownController(typeId) { return isDeviceType(typeId, 'UNKNOWN'); }
+        function isFalcon(typeId)         { return isDeviceType(typeId, 'FALCON'); }
+        function isFalconV4(typeId)       { return isDeviceType(typeId, 'FALCON_V4'); }
+        function isESPixelStick(typeId)   { return isDeviceType(typeId, 'ESPIXELSTICK'); }
+        function isSanDevices(typeId)     { return isDeviceType(typeId, 'SANDEVICES'); }
+        function isGenius(typeId)         { return isDeviceType(typeId, 'GENIUS'); }
+        function isWLED(typeId)           { return isDeviceType(typeId, 'WLED'); }
+        function isBaldrick(typeId)       { return isDeviceType(typeId, 'BALDRICK'); }
 
-                                if (type != "UNKNOWN") {
-                                    localFpposFiles.push({
-                                        type: type,
-                                        name: f.name,
-                                        sizeBytes: f.sizeBytes,
-                                        sizeHuman: f.sizeHuman
-                                    });
-                                }
-                            } // check if .fppos
-                        } // Verify has name
-                    }); // loop over files
-
-                    if (localFpposFiles.length > 0) {
-                        let html = [];
-                        localFpposFiles.forEach(function (f) {
-                            html.push('<div class="row">');
-                            html.push('<div class="col-2 col-sm-1"><input id="');
-                            html.push(f.name);
-                            html.push('" type="checkbox"></div>')
-                            html.push('<div class="col-7 col-sm-5 col-md-4 col-lg-3 col-xl-2">');
-                            html.push(f.name);
-                            html.push('</div><div class="col-2 col-sm-1">');
-                            html.push(f.type);
-                            html.push('</div><div class="col-2" col-md-1>');
-                            html.push(f.sizeHuman);
-                            html.push('</div>');
-                            html.push("</div>");
-                        });
-                        $("#copyOSOptionsDetails").html(html.join(''));
-                    }
-                } // hasOwnProperty("files");
-            });
-        }
+        // ============================================================
+        // SECTION: Utilities
+        // Future file: www/js/multisync/utils.js
+        // ============================================================
 
         /*
          * Does a deep object flattening of "obj" using the specified base path
@@ -461,58 +315,128 @@
 
         }
 
-        /*
-         * Returns Mode + value of "Send Multisync"
-         */
-        function getFullMode(data, ip) {
-            rc = "Unknown";
-            if (data.hasOwnProperty('mode')) {
-                rc = modeToString(data.mode);
-            }
-            if (data.hasOwnProperty('multisync') && data.multisync && data.mode == 2) {
-                rc += " w/ Multisync"
-            }
-
-            rc += getChannelIOIcons(data, ip);
-
-            return rc;
+        function s2ab(s) {
+            var buf = new ArrayBuffer(s.length); //convert s to arrayBuffer
+            var view = new Uint8Array(buf);  //create uint8array as viewer
+            for (var i = 0; i < s.length; i++) view[i] = s.charCodeAt(i) & 0xFF; //convert to octet
+            return buf;
         }
 
-        function getChannelIOIcons(data, ip) {
-            var icons = '';
-            var hasInput = data.hasOwnProperty('channelInputsEnabled') && data.channelInputsEnabled;
-            var hasOutput = data.hasOwnProperty('channelOutputsEnabled') && data.channelOutputsEnabled;
-            if (hasInput || hasOutput) {
-                var ipAttr = ip ? " data-ip='" + ip + "'" : '';
-                icons += '<span class="channel-io-icons">';
-                if (hasInput) {
-                    icons += '<i class="fas fa-regular fa-circle-down channel-io-icon-input"' + ipAttr + ' aria-label="Channel Inputs Enabled (hover for details)"></i>';
-                }
-                if (hasOutput) {
-                    icons += '<i class="fas fa-regular fa-circle-up channel-io-icon-output"' + ipAttr + ' aria-label="Channel Outputs Enabled (hover for details)"></i>';
-                }
-                icons += '</span>';
-            }
-            return icons;
+        function rowSpanSet(rowID) {
+            var rowSpan = 1;
+
+            if ($('#' + rowID + '_logs').is(':visible'))
+                rowSpan++;
+
+            if ($('#' + rowID + '_warnings').is(':visible'))
+                rowSpan++;
+
+            $('#' + rowID + ' > td:nth-child(1)').attr('rowspan', rowSpan);
         }
 
-        // Cache for remote channel output/input configs keyed by IP
-        var channelOutputConfigCache = {};
-        var channelInputConfigCache = {};
+        function proxyURLsInString(str, ip) {
+            if (!isProxied(ip))
+                return str;
 
-        // Universe type ID to display name mapping
-        var universeTypeNames = {
-            0: 'E1.31 Multicast',
-            1: 'E1.31 Unicast',
-            2: 'ArtNet Broadcast',
-            3: 'ArtNet Unicast',
-            4: 'DDP Raw',
-            5: 'DDP',
-            6: 'KiNet v1',
-            7: 'KiNet v2',
-            8: 'Twinkly',
-            9: 'ArtNet Unicast'
-        };
+            var re = /(href=['"])([^:]*)\//;
+            if (re.test(str))
+                str = str.replace(re, "$1proxy/" + ip + "/$2/");
+
+            return str;
+        }
+
+        function isProxied(ip) {
+            return proxies.includes(ip);
+        }
+
+        function wrapUrlWithProxy(ip, path) {
+            if (fppConfig.hideExternalURLs) {
+                return "";
+            }
+            if (isProxied(ip)) {
+                return 'proxy/' + ip + path;
+            }
+            return 'http://' + ip + path;
+        }
+
+        function ipLink(ip) {
+            if (fppConfig.hideExternalURLs) {
+                return ip;
+            }
+            return "<a target='host_" + ip + "' href='" + wrapUrlWithProxy(ip, "/") + "' data-ip='" + ip + "'>" + ip + "</a>";
+        }
+
+        // ============================================================
+        // SECTION: Network helpers
+        // Future file: www/js/multisync/network.js
+        // ============================================================
+
+        function IPsCanTalk(ip1, ip2, octets) {
+            var p1 = ip1.split('.');
+            var p2 = ip2.split('.');
+
+            switch (octets) {
+                case 3: if ((p1[0] == p2[0]) && (p1[1] == p2[1]) && (p1[2] == p2[2]))
+                    return true;
+                    break;
+                case 2: if ((p1[0] == p2[0]) && (p1[1] == p2[1]))
+                    return true;
+                    break;
+                case 1: if (p1[0] == p2[0])
+                    return true;
+                    break;
+            }
+
+            return false;
+        }
+
+        function getReachableIPFromRowID(id) {
+            var ip = ipFromRowID(id);
+            var ipListStr = $('#' + id).attr('data-iplist');
+
+            if (ip == ipListStr)
+                return ip;
+
+            var ipList = ipListStr.split(',');
+
+            for (var o = 3; o > 0; o--) {
+                for (var i = 0; i < systemsList.length; i++) {
+                    if (systemsList[i].local == 1) {
+                        for (var j = 0; j < ipList.length; j++) {
+                            if (IPsCanTalk(systemsList[i].address, ipList[j], o))
+                                return ipList[j];
+                        }
+                    }
+                }
+            }
+
+            return '';
+        }
+
+        function ipFromRowID(id) {
+            ip = $('#' + id).attr('data-ip');
+
+            return ip;
+        }
+        function ipOrHostnameFromRowID(id) {
+            var ip;
+            if (fppConfig.serverName !== fppConfig.serverAddr) {
+                // Hitting the FPP instance via hostname, not IP; use hostnames
+                // for remotes as well or CORS will trigger.
+                ip = $('#' + id + "_hostname").html();
+                if (ip == "") {
+                    ip = $('#' + id).attr('data-ip');
+                }
+            } else {
+                ip = $('#' + id).attr('data-ip');
+            }
+            return ip;
+        }
+
+        // ============================================================
+        // SECTION: Channel I/O
+        // Future file: www/js/multisync/channel-io.js
+        // ============================================================
 
         function getUniverseTypeName(typeId) {
             return universeTypeNames[typeId] || ('Type ' + typeId);
@@ -651,8 +575,6 @@
             });
         }
 
-
-
         // Track which IPs we've already probed for channel I/O on older systems
         var channelIOCheckedIPs = {};
 
@@ -725,436 +647,241 @@
             $modeCell.append(icons);
         }
 
-        function exportMultisync() {
-            if (systemStatusCache == null || systemStatusCache == "" || systemStatusCache == "null") {
-                $.jGrowl("Please wait until the system statuses finish loading", { themeState: 'danger' });
-                return;
+        // ============================================================
+        // SECTION: Display order
+        // Future file: www/js/multisync/display-order.js
+        // ============================================================
+
+        /**
+         * Returns a stable identifier for a system.
+         * Uses UUID for FPP systems (most stable across IP/hostname changes),
+         * falls back to hostname for non-FPP or systems without UUID.
+         */
+        function getSystemIdentifier(system) {
+            if (system.uuid && system.uuid !== '' && system.uuid !== 'Unknown') {
+                return 'uuid:' + system.uuid;
             }
-            const allKeys = new Set();
-            let finalData = {};
-            // Flatten the data
-            for (const [ip, data] of Object.entries(systemStatusCache)) {
-                let rc = {};
-                flattenObject(data, "", rc);
-                finalData[ip] = rc;
-
-                for (const [key, junk] of Object.entries(rc)) {
-                    allKeys.add(key);
-                }
-            }
-
-            // Create XLSX
-            const sortedKeys = Array.from(allKeys).sort();
-            let labels = ['ip'];
-            labels = labels.concat(sortedKeys);
-
-            let allRows = [];
-            allRows.push(labels);
-
-            for (const [ip, data] of Object.entries(finalData)) {
-                let row = [];
-                row.push(ip);
-                let value = "";
-                for (const key of sortedKeys) {
-                    if (key in data) {
-                        value = data[key];
-                    }
-                    row.push(value);
-                }
-                allRows.push(row);
-            }
-
-            var wb = XLSX.utils.book_new();
-            wb.SheetNames.push("Data");
-            var ws = XLSX.utils.aoa_to_sheet(allRows);
-            wb.Sheets["Data"] = ws;
-            var wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'binary' });
-            saveAs(new Blob([s2ab(wbout)], { type: "application/octet-stream" }), 'export.xlsx');
-
-        }
-
-        function s2ab(s) {
-            var buf = new ArrayBuffer(s.length); //convert s to arrayBuffer
-            var view = new Uint8Array(buf);  //create uint8array as viewer
-            for (var i = 0; i < s.length; i++) view[i] = s.charCodeAt(i) & 0xFF; //convert to octet
-            return buf;
-        }
-
-        function rowSpanSet(rowID) {
-            var rowSpan = 1;
-
-            if ($('#' + rowID + '_logs').is(':visible'))
-                rowSpan++;
-
-            if ($('#' + rowID + '_warnings').is(':visible'))
-                rowSpan++;
-
-            $('#' + rowID + ' > td:nth-child(1)').attr('rowspan', rowSpan);
-        }
-
-        // Updates the warning information for multi-sync
-        // Also handles if warnings row should be displayed in general.
-        function validateMultiSyncSettings() {
-            var multicastChecked = $('#MultiSyncMulticast').is(":checked");
-            var broadcastChecked = $('#MultiSyncBroadcast').is(":checked");
-            // Remove any Multisync warnings
-            $(document).find(".multisync-warning").remove();
-
-            // check if Warnings window should be shown
-            $(document).find('tr[id*="_warnings"').each(function () {
-                let cnt = $(this).find('td[id*="_warningCell"').children().length;
-                if (cnt == 0) { //no warnings
-                    $(this).hide();
-                } else { //has warning messages
-                    if ($(this).hasClass('filtered')) {
-                        $(this).hide();
-                    } else {
-                        $(this).show();
-                    }
-                }
-            });
-
-
-            // If these are unchecked, than each remote can be set either way
-            // no need to check anything
-            if (!(multicastChecked || broadcastChecked)) {
-                return;
-            }
-
-            $("input.syncCheckbox").each(function () {
-                if ($(this).is(":checked")) {
-                    let name = $(this).attr('name');
-                    let msg = "";
-                    if (multicastChecked) {
-                        msg = "Having Unicast checked when Multicast is enabled (view options below) is discouraged: " + name;
-                    } else {
-                        msg = "Having Unicast checked when Broadcast is enabled (view options below) is discouraged: " + name;
-                    }
-                    msg = '<div class="warning-text multisync-warning">' + msg + '</div>';
-                    $(this).closest('.systemRow').next(".warning-row").each(function () {
-                        $(this).find("td").append(msg);
-                        $(this).show();
-                    })
-                }
-            });
-        }
-
-        function updateMultiSyncRemotes(verbose = false) {
-            var remotes = "";
-
-            $('input.syncCheckbox').each(function () {
-                if ($(this).is(":checked")) {
-                    if (remotes != "") {
-                        remotes += ",";
-                    }
-                    remotes += $(this).attr("name");
-                }
-            });
-
-            var multicastChecked = $('#MultiSyncMulticast').is(":checked");
-            var broadcastChecked = $('#MultiSyncBroadcast').is(":checked");
-
-            if ((remotes == '') &&
-                (!$('#MultiSyncMulticast').is(":checked")) &&
-                (!$('#MultiSyncBroadcast').is(":checked"))) {
-                $('#MultiSyncMulticast').prop('checked', true).trigger('change');
-                alert('FPP will use multicast if no other sync methods are chosen.');
-            }
-
-            $.put("api/settings/MultiSyncRemotes", remotes
-            ).done(function () {
-                settings['MultiSyncRemotes'] = remotes;
-                if (verbose) {
-                    if (remotes == "") {
-                        $.jGrowl("Remote List Cleared.  You must restart fppd for the changes to take effect.", { themeState: 'success' });
-                    } else {
-                        $.jGrowl("Remote List set to: '" + remotes + "'.  You must restart fppd for the changes to take effect.", { themeState: 'success' });
-                    }
-                }
-
-                //Mark FPPD as needing restart
-                SetRestartFlag(2);
-                settings['restartFlag'] = 2;
-                //Get the resart banner showing
-                CheckRestartRebootFlags();
-                validateMultiSyncSettings();
-            }).fail(function () {
-                DialogError("Save Remotes", "Save Failed");
-            });
-
-        }
-
-        function isFPP(typeId) {
-            typeId = parseInt(typeId);
-
-            if ((typeId >= 0x01) && (typeId < 0x80))
-                return true;
-
-            return false;
-        }
-
-        function isFPPPi(typeId) {
-            typeId = parseInt(typeId);
-
-            if ((typeId >= 0x02) && (typeId <= 0x3F))
-                return true;
-
-            return false;
-        }
-
-        function isFPPBeagleBone(typeId) {
-            typeId = parseInt(typeId);
-
-            if ((typeId >= 0x41) && (typeId <= 0x5F))
-                return true;
-
-            return false;
-        }
-        function isFPPMac(typeId) {
-            typeId = parseInt(typeId);
-
-            if (typeId == 0x70)
-                return true;
-
-            return false;
-        }
-        function isFPPArmbian(typeId) {
-            typeId = parseInt(typeId);
-
-            if (typeId == 0x60)
-                return true;
-
-            return false;
-        }
-
-        function isUnknownController(typeId) {
-            typeId = parseInt(typeId);
-
-            if (typeId == 0x00)
-                return true;
-
-            return false;
-        }
-
-        function isFalcon(typeId) {
-            typeId = parseInt(typeId);
-
-            if ((typeId >= 0x80) && (typeId <= 0x87))
-                return true;
-
-            return false;
-        }
-
-        function isFalconV4(typeId) {
-            typeId = parseInt(typeId);
-
-            if ((typeId >= 0x88) && (typeId <= 0x8F))
-                return true;
-
-            return false;
-        }
-
-        function isESPixelStick(typeId) {
-            typeId = parseInt(typeId);
-
-            if (typeId == 0xC2 || typeId == 0xC3)
-                return true;
-
-            return false;
-        }
-
-        function isSanDevices(typeId) {
-            typeId = parseInt(typeId);
-
-            if (typeId == 0xFF)
-                return true;
-
-            return false;
-        }
-
-        function isGenius(typeId) {
-            typeId = parseInt(typeId);
-
-            if ((typeId >= 0xA0) && (typeId <= 0xAF))
-                return true;
-
-            return false;
-        }
-
-
-        function isWLED(typeId) {
-            typeId = parseInt(typeId);
-
-            if (typeId == 0xFB)
-                return true;
-
-            return false;
-        }
-
-        function isBaldrick(typeId) {
-            typeId = parseInt(typeId);
-
-            if (typeId == 0xC4)
-                return true;
-
-            return false;
-        }
-
-        function proxyURLsInString(str, ip) {
-            if (!isProxied(ip))
-                return str;
-
-            var re = /(href=['"])([^:]*)\//;
-            if (re.test(str))
-                str = str.replace(re, "$1proxy/" + ip + "/$2/");
-
-            return str;
-        }
-
-        function isProxied(ip) {
-            return proxies.includes(ip);
+            return 'host:' + (system.hostname || system.address);
         }
 
         /**
-         * Extracts unique platform types from all selected (checked) remote systems.
-         * Skips systems that are currently filtered out in the UI.
-         *
-         * @returns {Array} Array of unique platform names (e.g., ['BBB', 'Pi'])
+         * Sorts a systems data array based on the saved display order.
+         * Systems matching saved identifiers appear first in saved order,
+         * unknown systems are appended at the end sorted by hostname.
          */
-        function getUniquePlatformsFromSelectedCheckboxes() {
-            var platforms = new Set();
+        function applySavedDisplayOrder(data, order) {
+            if (!order || order.length === 0) return data;
 
-            $('input.remoteCheckbox').each(function () {
-                if ($(this).is(":checked")) {
-                    var rowID = $(this).closest('tr').attr('id');
-                    if ($('#' + rowID).hasClass('filtered')) {
-                        return true;
-                    }
-                    var platform = $('#' + rowID + '_platform').text();
-                    if (platform) {
-                        platforms.add(platform);
-                    }
-                }
+            var orderMap = {};
+            for (var i = 0; i < order.length; i++) {
+                orderMap[order[i]] = i;
+            }
+
+            var sorted = data.slice(); // clone to avoid mutating original
+            sorted.sort(function (a, b) {
+                var idA = getSystemIdentifier(a);
+                var idB = getSystemIdentifier(b);
+                var posA = orderMap.hasOwnProperty(idA) ? orderMap[idA] : 99999;
+                var posB = orderMap.hasOwnProperty(idB) ? orderMap[idB] : 99999;
+                if (posA !== posB) return posA - posB;
+                // For systems not in saved order, sort by hostname
+                return (a.hostname || a.address).localeCompare(b.hostname || b.address);
             });
-
-            return Array.from(platforms);
+            return sorted;
         }
 
         /**
-         * Extracts unique IP addresses from all selected (checked) remote systems.
-         * Skips systems that are currently filtered out in the UI.
-         *
-         * @returns {Array} Array of unique IP addresses from selected systems
+         * Saves the current visible table row order as the display order.
+         * Captures system identifiers from the current DOM order (which reflects
+         * any column sort the user has applied).
          */
-        function getUniqueIpFromSelectedCheckboxes() {
-            var ips = new Set();
-
-            $('input.remoteCheckbox').each(function () {
-                if ($(this).is(":checked")) {
-                    var rowID = $(this).closest('tr').attr('id');
-                    if ($('#' + rowID).hasClass('filtered')) {
-                        return true;
-                    }
-                    var ip = ipFromRowID(rowID);
-                    if (ip) {
-                        ips.add(ip);
-                    }
-                }
-            });
-
-            return Array.from(ips);
-        }
-
-        /**
-         * Validates the prerequisites for performing an OS upgrade on selected systems.
-         * Checks that:
-         * - At least one system is selected
-         * - All selected systems have the same platform
-         *
-         * As a side effect, updates the list of available OS files via updateOSFileList()
-         *
-         * Displays appropriate warning messages if validation fails, or clears warnings
-         * and populates the OS file dropdown if validation succeeds.
-         */
-        function validateOSUpgrade() {
-            var uniquePlatforms = getUniquePlatformsFromSelectedCheckboxes();
-            var warningDiv = $('#osUpgradeWarning');
-            $('#osUpgradeActionDiv').hide();
-
-            if (uniquePlatforms.length === 0) {
-                warningDiv.html('You must select at least one remote system.');
-            } else if (uniquePlatforms.length > 1) {
-                warningDiv.html('All selected systems must have the same platform. Currently selected: ' + uniquePlatforms.join(', '));
-            } else {
-                warningDiv.html('');
-            }
-
-            if (!$('#osUpgradeOptions').is(':visible') || warningDiv.html() != '') {
-                // No point in doing Rest calls if the section isn't shown or there are warnings.
-                return;
-            }
-
-            var ips = getUniqueIpFromSelectedCheckboxes();
-            if (ips.length == 0) {
-                warningDiv.html('Unable to find IP address for selected systems. Please ensure at least one system is selected and not filtered out.');
-            } else {
-                var foundFiles = false;
-                var checkNextIp = function (index) {
-                    if (foundFiles || index >= ips.length) {
-                        return;
-                    }
-
-                    var ip = ips[index];
-                    warningDiv.html('Please Wait... Checking ' + ip + ' for OS Upgrade files...');
-                    $.ajax({
-                        url: 'api/remoteAction?ip=' + ip + '&action=listUpgrades',
-                        type: 'GET',
-                        dataType: 'json'
-                    }).done(function (data) {
-                        if (data && Array.isArray(data.files) && data.files.length > 0) {
-                            foundFiles = true;
-                            warningDiv.html('');
-                            updateOSFileList(data.files);
-                        } else {
-                            checkNextIp(index + 1);
+        function saveDisplayOrder() {
+            var order = [];
+            var seen = {};
+            $('#fppSystems tr.systemRow').each(function () {
+                var ipList = $(this).attr('data-iplist');
+                if (!ipList) return;
+                var primaryIp = ipList.split(',')[0];
+                for (var i = 0; i < systemsList.length; i++) {
+                    if (systemsList[i].address === primaryIp) {
+                        var id = getSystemIdentifier(systemsList[i]);
+                        if (!seen[id]) {
+                            order.push(id);
+                            seen[id] = true;
                         }
-                    })
-                        .fail(function (error) {
-                            console.error('Error querying ' + ip + ':', error);
-                            checkNextIp(index + 1);
-                        });
-                };
-                checkNextIp(0);
+                        break;
+                    }
+                }
+            });
+
+            if (order.length === 0) {
+                $.jGrowl('No systems to save order for.', { themeState: 'detract' });
+                return;
+            }
+
+            savedDisplayOrder = order;
+            // Store as pipe-delimited string to avoid JSON-in-INI quoting issues
+            SetSetting('MultiSyncDisplayOrder', order.join('|'), 0, 0);
+
+            // Clear sort so our custom order takes effect on next load
+            $('#fppSystemsTable').bootstrapTable('sortReset');
+
+            updateDisplayOrderButtons();
+
+            // Exit reorder mode if active
+            if (reorderModeActive) {
+                toggleReorderMode();
+            }
+
+            $.jGrowl('Display order saved.', { themeState: 'success' });
+        }
+
+        /**
+         * Clears the saved display order and refreshes the system list.
+         */
+        function clearDisplayOrder() {
+            savedDisplayOrder = [];
+            SetSetting('MultiSyncDisplayOrder', '', 0, 0);
+            updateDisplayOrderButtons();
+
+            // Exit reorder mode if active
+            if (reorderModeActive) {
+                toggleReorderMode();
+            }
+
+            $.jGrowl('Display order cleared.', { themeState: 'success' });
+            getFPPSystems();
+        }
+
+        /**
+         * Re-applies the saved display order by re-parsing the systems list.
+         * Useful when user has sorted by a column and wants to return to saved order.
+         */
+        function sortBySavedOrder() {
+            if (!savedDisplayOrder || savedDisplayOrder.length === 0) {
+                $.jGrowl('No saved display order.', { themeState: 'detract' });
+                return;
+            }
+            parseFPPSystems(systemsList);
+            // Clear sort to preserve our DOM order
+            $('#fppSystemsTable').bootstrapTable('sortReset');
+        }
+
+        /**
+         * Updates visibility and text of display order buttons based on current state.
+         */
+        function updateDisplayOrderButtons() {
+            if (savedDisplayOrder && savedDisplayOrder.length > 0) {
+                $('#clearDisplayOrderBtn').show();
+                $('#sortBySavedOrderBtn').show();
+                $('#saveDisplayOrderBtn').html('<i class="fas fa-save"></i> Update Display Order');
+            } else {
+                $('#clearDisplayOrderBtn').hide();
+                $('#sortBySavedOrderBtn').hide();
+                $('#saveDisplayOrderBtn').html('<i class="fas fa-save"></i> Save Display Order');
             }
         }
 
         /**
-         * Updates the OS file dropdown list with available OS upgrade files.
-         * Clears previous options and populates with new files, applying a minimum
-         * asset_id threshold to filter out deprecated versions.
-         * Makes the upgrade action div visible after populating the list.
-         *
-         * @param {Array} files - Array of file objects containing 'asset_id' and 'filename' properties
+         * Toggles reorder mode on/off.
+         * When enabled: adds drag handles, enables jQuery UI sortable on tbody,
+         * disables column sorting.
+         * When disabled: removes sortable, re-enables sorting.
          */
-        function updateOSFileList(files) {
-            // Cleanup previous load values
-            $('#OSSelect option').filter(function () { return parseInt(this.value) > 0; }).remove();
+        function toggleReorderMode() {
+            reorderModeActive = !reorderModeActive;
+            var $table = $('#fppSystemsTable');
+            var $tbody = $('#fppSystems');
 
+            if (reorderModeActive) {
+                $table.addClass('reorder-mode');
+                $('#reorderModeBtn').html('<i class="fas fa-arrows-alt"></i> Exit Reorder Mode').removeClass('btn-secondary').addClass('btn-warning');
+                $('#saveDisplayOrderBtn').show();
 
-            for (const file of files) {
-                let id = file["asset_id"];
-                if (id < 211762298) {
-                    // This is a safety check to prevent some really old files from showing up in the list.
-                    // The asset_id may need to be manually updated in the future.
-                    continue;
+                // Disable header click sorting
+                $table.find('th').css('pointer-events', 'none');
+                // Disable filter inputs
+                $table.find('.filter-control input, .filter-control select').prop('disabled', true);
+
+                // Enable jQuery UI sortable on tbody
+                $tbody.sortable({
+                    items: '> tr.systemRow',
+                    handle: '.reorder-grip',
+                    axis: 'y',
+                    tolerance: 'pointer',
+                    helper: function (e, tr) {
+                        // Preserve column widths while dragging
+                        var $originals = tr.children();
+                        var $helper = tr.clone();
+                        $helper.children().each(function (index) {
+                            $(this).width($originals.eq(index).outerWidth());
+                        });
+                        return $helper;
+                    },
+                    start: function (event, ui) {
+                        // Hide child rows (warnings, logs) during drag
+                        var rowID = ui.item.attr('id');
+                        $('#' + rowID + '_warnings, #' + rowID + '_logs').hide();
+                    },
+                    stop: function (event, ui) {
+                        var rowID = ui.item.attr('id');
+                        rowSpanSet(rowID);
+                    }
+                });
+            } else {
+                $table.removeClass('reorder-mode');
+                $('#reorderModeBtn').html('<i class="fas fa-arrows-alt"></i> Reorder Systems').removeClass('btn-warning').addClass('btn-secondary');
+
+                // Destroy sortable
+                if ($tbody.sortable('instance')) {
+                    $tbody.sortable('destroy');
                 }
-                $('#OSSelect').append($('<option>', {
-                    value: id,
-                    text: file["filename"]
-                }));
+
+                // Re-enable header click sorting
+                $table.find('th').css('pointer-events', '');
+                // Re-enable filter inputs
+                $table.find('.filter-control input, .filter-control select').prop('disabled', false);
+            }
+        }
+
+        // ============================================================
+        // SECTION: HTML renderers
+        // Future file: www/js/multisync/render.js
+        // ============================================================
+
+        /*
+         * Returns Mode + value of "Send Multisync"
+         */
+        function getFullMode(data, ip) {
+            rc = "Unknown";
+            if (data.hasOwnProperty('mode')) {
+                rc = modeToString(data.mode);
+            }
+            if (data.hasOwnProperty('multisync') && data.multisync && data.mode == 2) {
+                rc += " w/ Multisync"
             }
 
-            $('#osUpgradeActionDiv').show();
+            rc += getChannelIOIcons(data, ip);
+
+            return rc;
+        }
+
+        function getChannelIOIcons(data, ip) {
+            var icons = '';
+            var hasInput = data.hasOwnProperty('channelInputsEnabled') && data.channelInputsEnabled;
+            var hasOutput = data.hasOwnProperty('channelOutputsEnabled') && data.channelOutputsEnabled;
+            if (hasInput || hasOutput) {
+                var ipAttr = ip ? " data-ip='" + ip + "'" : '';
+                icons += '<span class="channel-io-icons">';
+                if (hasInput) {
+                    icons += '<i class="fas fa-regular fa-circle-down channel-io-icon-input"' + ipAttr + ' aria-label="Channel Inputs Enabled (hover for details)"></i>';
+                }
+                if (hasOutput) {
+                    icons += '<i class="fas fa-regular fa-circle-up channel-io-icon-output"' + ipAttr + ' aria-label="Channel Outputs Enabled (hover for details)"></i>';
+                }
+                icons += '</span>';
+            }
+            return icons;
         }
 
         function getLocalVersionLink(ip, data) {
@@ -1181,25 +908,10 @@
             return localVer;
         }
 
-        var ipRows = new Object();
-
-        var refreshTimer = null;
-        var geniusRefreshTimer = null;
-        var wledRefreshTimer = null;
-        var baldrickRefreshTimer = null;
-        var falconRefreshTimer = null;
-        function clearRefreshTimers() {
-            clearTimeout(refreshTimer);
-            clearTimeout(geniusRefreshTimer);
-            clearTimeout(wledRefreshTimer);
-            clearTimeout(baldrickRefreshTimer);
-            clearTimeout(falconRefreshTimer);
-            refreshTimer = null;
-            geniusRefreshTimer = null;
-            wledRefreshTimer = null;
-            falconRefreshTimer = null;
-        }
-        var unavailables = [];
+        // ============================================================
+        // SECTION: FPP system polling
+        // Future file: www/js/multisync/polling.js
+        // ============================================================
 
         function getFPPSystemStatus(ipAddresses, refreshing = false) {
             ips = "";
@@ -1573,13 +1285,6 @@
 
             validateMultiSyncSettings();
         } // end of "api/system/status?ip=" + ips
-
-        function ipLink(ip) {
-            if (fppConfig.hideExternalURLs) {
-                return ip;
-            }
-            return "<a target='host_" + ip + "' href='" + wrapUrlWithProxy(ip, "/") + "' data-ip='" + ip + "'>" + ip + "</a>";
-        }
 
         function parseFPPSystems(data) {
             // Apply saved display order if one exists
@@ -2047,6 +1752,11 @@
             });
         }
 
+        // ============================================================
+        // SECTION: ESPixelStick polling
+        // Future file: www/js/multisync/polling.js
+        // ============================================================
+
         var ESPSockets = {};
         function parseESPixelStickConfig(ip, data) {
             var s = JSON.parse(data);
@@ -2191,15 +1901,10 @@
         }
 
 
-        function wrapUrlWithProxy(ip, path) {
-            if (fppConfig.hideExternalURLs) {
-                return "";
-            }
-            if (isProxied(ip)) {
-                return 'proxy/' + ip + path;
-            }
-            return 'http://' + ip + path;
-        }
+        // ============================================================
+        // SECTION: Falcon polling
+        // Future file: www/js/multisync/polling.js
+        // ============================================================
 
         function getFalconControllerStatus(fv3ips, fv4ips, refreshing = false) {
             if (falconRefreshTimer != null) {
@@ -2324,6 +2029,11 @@
             }
         }
 
+        // ============================================================
+        // SECTION: WLED polling
+        // Future file: www/js/multisync/polling.js
+        // ============================================================
+
         function getWLEDControllerStatus(ipAddresses, refreshing = false) {
             ips = "";
             if (Array.isArray(ipAddresses)) {
@@ -2380,6 +2090,11 @@
                 });
         }
 
+        // ============================================================
+        // SECTION: Genius polling
+        // Future file: www/js/multisync/polling.js
+        // ============================================================
+
         function getGeniusControllerStatus(ipAddresses, refreshing = false) {
             ips = "";
             if (Array.isArray(ipAddresses)) {
@@ -2435,6 +2150,11 @@
                     }
                 });
         }
+
+        // ============================================================
+        // SECTION: Baldrick polling
+        // Future file: www/js/multisync/polling.js
+        // ============================================================
 
         function getBaldrickControllerStatus(ipAddresses, refreshing = false) {
             ips = "";
@@ -2510,6 +2230,23 @@
                         baldrickRefreshTimer = setTimeout(function () { getBaldrickControllerStatus(ipAddresses, true); }, 2000);
                     }
                 });
+        }
+
+        // ============================================================
+        // SECTION: Refresh orchestration
+        // Future file: www/js/multisync/polling.js
+        // ============================================================
+
+        function clearRefreshTimers() {
+            clearTimeout(refreshTimer);
+            clearTimeout(geniusRefreshTimer);
+            clearTimeout(wledRefreshTimer);
+            clearTimeout(baldrickRefreshTimer);
+            clearTimeout(falconRefreshTimer);
+            refreshTimer = null;
+            geniusRefreshTimer = null;
+            wledRefreshTimer = null;
+            falconRefreshTimer = null;
         }
 
         function RefreshStats() {
@@ -2602,69 +2339,207 @@
             }
         }
 
-        function IPsCanTalk(ip1, ip2, octets) {
-            var p1 = ip1.split('.');
-            var p2 = ip2.split('.');
+        // ============================================================
+        // SECTION: OS upgrade helpers
+        // Future file: www/js/multisync/actions.js
+        // ============================================================
 
-            switch (octets) {
-                case 3: if ((p1[0] == p2[0]) && (p1[1] == p2[1]) && (p1[2] == p2[2]))
-                    return true;
-                    break;
-                case 2: if ((p1[0] == p2[0]) && (p1[1] == p2[1]))
-                    return true;
-                    break;
-                case 1: if (p1[0] == p2[0])
-                    return true;
-                    break;
-            }
+        function getLocalFpposFiles() {
+            $.get('api/files/uploads', function (data) {
+                if (data.hasOwnProperty("files")) {
+                    data.files.forEach(function (f) {
+                        if (f.hasOwnProperty("name")) {
+                            if (f.name.endsWith(".fppos")) {
+                                let type = "UNKNOWN";
+                                if (f.name.startsWith("BBB-")) {
+                                    type = "BBB";
+                                } else if (f.name.startsWith("BB64-")) {
+                                    type = "BB64";
+                                } else if (f.name.startsWith("Pi-")) {
+                                    type = "PI";
+                                }
 
-            return false;
+                                if (type != "UNKNOWN") {
+                                    localFpposFiles.push({
+                                        type: type,
+                                        name: f.name,
+                                        sizeBytes: f.sizeBytes,
+                                        sizeHuman: f.sizeHuman
+                                    });
+                                }
+                            } // check if .fppos
+                        } // Verify has name
+                    }); // loop over files
+
+                    if (localFpposFiles.length > 0) {
+                        let html = [];
+                        localFpposFiles.forEach(function (f) {
+                            html.push('<div class="row">');
+                            html.push('<div class="col-2 col-sm-1"><input id="');
+                            html.push(f.name);
+                            html.push('" type="checkbox"></div>')
+                            html.push('<div class="col-7 col-sm-5 col-md-4 col-lg-3 col-xl-2">');
+                            html.push(f.name);
+                            html.push('</div><div class="col-2 col-sm-1">');
+                            html.push(f.type);
+                            html.push('</div><div class="col-2" col-md-1>');
+                            html.push(f.sizeHuman);
+                            html.push('</div>');
+                            html.push("</div>");
+                        });
+                        $("#copyOSOptionsDetails").html(html.join(''));
+                    }
+                } // hasOwnProperty("files");
+            });
         }
 
-        function getReachableIPFromRowID(id) {
-            var ip = ipFromRowID(id);
-            var ipListStr = $('#' + id).attr('data-iplist');
+        /**
+         * Extracts unique platform types from all selected (checked) remote systems.
+         * Skips systems that are currently filtered out in the UI.
+         *
+         * @returns {Array} Array of unique platform names (e.g., ['BBB', 'Pi'])
+         */
+        function getUniquePlatformsFromSelectedCheckboxes() {
+            var platforms = new Set();
 
-            if (ip == ipListStr)
-                return ip;
-
-            var ipList = ipListStr.split(',');
-
-            for (var o = 3; o > 0; o--) {
-                for (var i = 0; i < systemsList.length; i++) {
-                    if (systemsList[i].local == 1) {
-                        for (var j = 0; j < ipList.length; j++) {
-                            if (IPsCanTalk(systemsList[i].address, ipList[j], o))
-                                return ipList[j];
-                        }
+            $('input.remoteCheckbox').each(function () {
+                if ($(this).is(":checked")) {
+                    var rowID = $(this).closest('tr').attr('id');
+                    if ($('#' + rowID).hasClass('filtered')) {
+                        return true;
+                    }
+                    var platform = $('#' + rowID + '_platform').text();
+                    if (platform) {
+                        platforms.add(platform);
                     }
                 }
-            }
+            });
 
-            return '';
+            return Array.from(platforms);
         }
 
-        function ipFromRowID(id) {
-            ip = $('#' + id).attr('data-ip');
+        /**
+         * Extracts unique IP addresses from all selected (checked) remote systems.
+         * Skips systems that are currently filtered out in the UI.
+         *
+         * @returns {Array} Array of unique IP addresses from selected systems
+         */
+        function getUniqueIpFromSelectedCheckboxes() {
+            var ips = new Set();
 
-            return ip;
-        }
-        function ipOrHostnameFromRowID(id) {
-            var ip;
-            if (fppConfig.serverName !== fppConfig.serverAddr) {
-                // Hitting the FPP instance via hostname, not IP; use hostnames
-                // for remotes as well or CORS will trigger.
-                ip = $('#' + id + "_hostname").html();
-                if (ip == "") {
-                    ip = $('#' + id).attr('data-ip');
+            $('input.remoteCheckbox').each(function () {
+                if ($(this).is(":checked")) {
+                    var rowID = $(this).closest('tr').attr('id');
+                    if ($('#' + rowID).hasClass('filtered')) {
+                        return true;
+                    }
+                    var ip = ipFromRowID(rowID);
+                    if (ip) {
+                        ips.add(ip);
+                    }
                 }
-            } else {
-                ip = $('#' + id).attr('data-ip');
-            }
-            return ip;
+            });
+
+            return Array.from(ips);
         }
 
-        var streamCount = 0;
+        /**
+         * Validates the prerequisites for performing an OS upgrade on selected systems.
+         * Checks that:
+         * - At least one system is selected
+         * - All selected systems have the same platform
+         *
+         * As a side effect, updates the list of available OS files via updateOSFileList()
+         *
+         * Displays appropriate warning messages if validation fails, or clears warnings
+         * and populates the OS file dropdown if validation succeeds.
+         */
+        function validateOSUpgrade() {
+            var uniquePlatforms = getUniquePlatformsFromSelectedCheckboxes();
+            var warningDiv = $('#osUpgradeWarning');
+            $('#osUpgradeActionDiv').hide();
+
+            if (uniquePlatforms.length === 0) {
+                warningDiv.html('You must select at least one remote system.');
+            } else if (uniquePlatforms.length > 1) {
+                warningDiv.html('All selected systems must have the same platform. Currently selected: ' + uniquePlatforms.join(', '));
+            } else {
+                warningDiv.html('');
+            }
+
+            if (!$('#osUpgradeOptions').is(':visible') || warningDiv.html() != '') {
+                // No point in doing Rest calls if the section isn't shown or there are warnings.
+                return;
+            }
+
+            var ips = getUniqueIpFromSelectedCheckboxes();
+            if (ips.length == 0) {
+                warningDiv.html('Unable to find IP address for selected systems. Please ensure at least one system is selected and not filtered out.');
+            } else {
+                var foundFiles = false;
+                var checkNextIp = function (index) {
+                    if (foundFiles || index >= ips.length) {
+                        return;
+                    }
+
+                    var ip = ips[index];
+                    warningDiv.html('Please Wait... Checking ' + ip + ' for OS Upgrade files...');
+                    $.ajax({
+                        url: 'api/remoteAction?ip=' + ip + '&action=listUpgrades',
+                        type: 'GET',
+                        dataType: 'json'
+                    }).done(function (data) {
+                        if (data && Array.isArray(data.files) && data.files.length > 0) {
+                            foundFiles = true;
+                            warningDiv.html('');
+                            updateOSFileList(data.files);
+                        } else {
+                            checkNextIp(index + 1);
+                        }
+                    })
+                        .fail(function (error) {
+                            console.error('Error querying ' + ip + ':', error);
+                            checkNextIp(index + 1);
+                        });
+                };
+                checkNextIp(0);
+            }
+        }
+
+        /**
+         * Updates the OS file dropdown list with available OS upgrade files.
+         * Clears previous options and populates with new files, applying a minimum
+         * asset_id threshold to filter out deprecated versions.
+         * Makes the upgrade action div visible after populating the list.
+         *
+         * @param {Array} files - Array of file objects containing 'asset_id' and 'filename' properties
+         */
+        function updateOSFileList(files) {
+            // Cleanup previous load values
+            $('#OSSelect option').filter(function () { return parseInt(this.value) > 0; }).remove();
+
+
+            for (const file of files) {
+                let id = file["asset_id"];
+                if (id < 211762298) {
+                    // This is a safety check to prevent some really old files from showing up in the list.
+                    // The asset_id may need to be manually updated in the future.
+                    continue;
+                }
+                $('#OSSelect').append($('<option>', {
+                    value: id,
+                    text: file["filename"]
+                }));
+            }
+
+            $('#osUpgradeActionDiv').show();
+        }
+
+        // ============================================================
+        // SECTION: Stream / upgrade actions
+        // Future file: www/js/multisync/actions.js
+        // ============================================================
+
         function EnableDisableStreamButtons() {
             if (streamCount) {
                 $('#performActionButton').prop("disabled", true);
@@ -2864,6 +2739,11 @@
             });
         }
 
+        // ============================================================
+        // SECTION: System actions
+        // Future file: www/js/multisync/actions.js
+        // ============================================================
+
         function actionDone(id) {
             id = id.replace('_logText', '');
             $('#' + id + '_doneButtons').show();
@@ -2985,6 +2865,11 @@
             });
         }
 
+        // ============================================================
+        // SECTION: Git / branch actions
+        // Future file: www/js/multisync/actions.js
+        // ============================================================
+
         function changeBranch(rowID) {
             streamCount++;
             EnableDisableStreamButtons();
@@ -3022,6 +2907,11 @@
                 }
             });
         }
+
+        // ============================================================
+        // SECTION: File copy actions
+        // Future file: www/js/multisync/actions.js
+        // ============================================================
 
         function copyFilesToSystem(rowID) {
             streamCount++;
@@ -3166,6 +3056,11 @@
                 $('#fppSystemsTableWrapper').addClass('fppTableWrapperErrored');
         }
 
+        // ============================================================
+        // SECTION: Proxy actions
+        // Future file: www/js/multisync/actions.js
+        // ============================================================
+
         function addProxyForIP(rowID) {
             var ip = ipFromRowID(rowID);
             $.post("api/proxies/" + ip, "AddProxy").done(function (data) {
@@ -3187,6 +3082,11 @@
                 }
             });
         }
+
+        // ============================================================
+        // SECTION: Selection helpers
+        // Future file: www/js/multisync/actions.js
+        // ============================================================
 
         function clearSelected() {
             // clear all entries, even if filtered
@@ -3220,6 +3120,156 @@
                 rowSpanSet(rowID);
             });
         }
+
+        // ============================================================
+        // SECTION: MultiSync settings
+        // Future file: www/js/multisync/actions.js
+        // ============================================================
+
+        // Updates the warning information for multi-sync
+        // Also handles if warnings row should be displayed in general.
+        function validateMultiSyncSettings() {
+            var multicastChecked = $('#MultiSyncMulticast').is(":checked");
+            var broadcastChecked = $('#MultiSyncBroadcast').is(":checked");
+            // Remove any Multisync warnings
+            $(document).find(".multisync-warning").remove();
+
+            // check if Warnings window should be shown
+            $(document).find('tr[id*="_warnings"').each(function () {
+                let cnt = $(this).find('td[id*="_warningCell"').children().length;
+                if (cnt == 0) { //no warnings
+                    $(this).hide();
+                } else { //has warning messages
+                    if ($(this).hasClass('filtered')) {
+                        $(this).hide();
+                    } else {
+                        $(this).show();
+                    }
+                }
+            });
+
+
+            // If these are unchecked, than each remote can be set either way
+            // no need to check anything
+            if (!(multicastChecked || broadcastChecked)) {
+                return;
+            }
+
+            $("input.syncCheckbox").each(function () {
+                if ($(this).is(":checked")) {
+                    let name = $(this).attr('name');
+                    let msg = "";
+                    if (multicastChecked) {
+                        msg = "Having Unicast checked when Multicast is enabled (view options below) is discouraged: " + name;
+                    } else {
+                        msg = "Having Unicast checked when Broadcast is enabled (view options below) is discouraged: " + name;
+                    }
+                    msg = '<div class="warning-text multisync-warning">' + msg + '</div>';
+                    $(this).closest('.systemRow').next(".warning-row").each(function () {
+                        $(this).find("td").append(msg);
+                        $(this).show();
+                    })
+                }
+            });
+        }
+
+        function updateMultiSyncRemotes(verbose = false) {
+            var remotes = "";
+
+            $('input.syncCheckbox').each(function () {
+                if ($(this).is(":checked")) {
+                    if (remotes != "") {
+                        remotes += ",";
+                    }
+                    remotes += $(this).attr("name");
+                }
+            });
+
+            var multicastChecked = $('#MultiSyncMulticast').is(":checked");
+            var broadcastChecked = $('#MultiSyncBroadcast').is(":checked");
+
+            if ((remotes == '') &&
+                (!$('#MultiSyncMulticast').is(":checked")) &&
+                (!$('#MultiSyncBroadcast').is(":checked"))) {
+                $('#MultiSyncMulticast').prop('checked', true).trigger('change');
+                alert('FPP will use multicast if no other sync methods are chosen.');
+            }
+
+            $.put("api/settings/MultiSyncRemotes", remotes
+            ).done(function () {
+                settings['MultiSyncRemotes'] = remotes;
+                if (verbose) {
+                    if (remotes == "") {
+                        $.jGrowl("Remote List Cleared.  You must restart fppd for the changes to take effect.", { themeState: 'success' });
+                    } else {
+                        $.jGrowl("Remote List set to: '" + remotes + "'.  You must restart fppd for the changes to take effect.", { themeState: 'success' });
+                    }
+                }
+
+                //Mark FPPD as needing restart
+                SetRestartFlag(2);
+                settings['restartFlag'] = 2;
+                //Get the resart banner showing
+                CheckRestartRebootFlags();
+                validateMultiSyncSettings();
+            }).fail(function () {
+                DialogError("Save Remotes", "Save Failed");
+            });
+
+        }
+
+        function exportMultisync() {
+            if (systemStatusCache == null || systemStatusCache == "" || systemStatusCache == "null") {
+                $.jGrowl("Please wait until the system statuses finish loading", { themeState: 'danger' });
+                return;
+            }
+            const allKeys = new Set();
+            let finalData = {};
+            // Flatten the data
+            for (const [ip, data] of Object.entries(systemStatusCache)) {
+                let rc = {};
+                flattenObject(data, "", rc);
+                finalData[ip] = rc;
+
+                for (const [key, junk] of Object.entries(rc)) {
+                    allKeys.add(key);
+                }
+            }
+
+            // Create XLSX
+            const sortedKeys = Array.from(allKeys).sort();
+            let labels = ['ip'];
+            labels = labels.concat(sortedKeys);
+
+            let allRows = [];
+            allRows.push(labels);
+
+            for (const [ip, data] of Object.entries(finalData)) {
+                let row = [];
+                row.push(ip);
+                let value = "";
+                for (const key of sortedKeys) {
+                    if (key in data) {
+                        value = data[key];
+                    }
+                    row.push(value);
+                }
+                allRows.push(row);
+            }
+
+            var wb = XLSX.utils.book_new();
+            wb.SheetNames.push("Data");
+            var ws = XLSX.utils.aoa_to_sheet(allRows);
+            wb.Sheets["Data"] = ws;
+            var wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'binary' });
+            saveAs(new Blob([s2ab(wbout)], { type: "application/octet-stream" }), 'export.xlsx');
+
+        }
+
+        // ============================================================
+        // SECTION: Multi-action dispatch
+        // Future file: www/js/multisync/actions.js
+        // ============================================================
 
         async function triggerCSPBashScript() {
             try {
