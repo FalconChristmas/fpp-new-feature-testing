@@ -203,11 +203,31 @@
 
         var ipRows = new Object();
 
-        var refreshTimer = null;
-        var geniusRefreshTimer = null;
-        var wledRefreshTimer = null;
-        var baldrickRefreshTimer = null;
-        var falconRefreshTimer = null;
+        class AutoRefreshController {
+            constructor(intervalMs = 2000) {
+                this._timer = null;
+                this._intervalMs = intervalMs;
+            }
+            schedule(fn) {
+                this.cancel();
+                this._timer = setTimeout(() => {
+                    this._timer = null;
+                    fn();
+                }, this._intervalMs);
+            }
+            cancel() {
+                if (this._timer !== null) {
+                    clearTimeout(this._timer);
+                    this._timer = null;
+                }
+            }
+        }
+
+        const fppPoller     = new AutoRefreshController();
+        const falconPoller  = new AutoRefreshController();
+        const wledPoller    = new AutoRefreshController();
+        const geniusPoller  = new AutoRefreshController();
+        const baldrickPoller = new AutoRefreshController();
 
         var unavailables = [];
         var reorderModeActive = false;
@@ -446,27 +466,37 @@
          * Fetches channel output config from a remote FPP system.
          * Returns a promise resolving to the parsed config data.
          */
-        function fetchChannelOutputConfig(ip) {
+        async function fetchChannelOutputConfig(ip) {
             if (channelOutputConfigCache[ip]) {
-                return Promise.resolve(channelOutputConfigCache[ip]);
+                return channelOutputConfigCache[ip];
             }
-            return fetch('api/channel/output/universeOutputs?ip=' + encodeURIComponent(ip))
-                .then(function (r) { return r.json(); })
-                .then(function (data) { channelOutputConfigCache[ip] = data; return data; })
-                .catch(function () { channelOutputConfigCache[ip] = null; return null; });
+            try {
+                const r = await fetch('api/channel/output/universeOutputs?ip=' + encodeURIComponent(ip));
+                const data = await r.json();
+                channelOutputConfigCache[ip] = data;
+                return data;
+            } catch {
+                channelOutputConfigCache[ip] = null;
+                return null;
+            }
         }
 
         /**
          * Fetches channel input config from a remote FPP system.
          */
-        function fetchChannelInputConfig(ip) {
+        async function fetchChannelInputConfig(ip) {
             if (channelInputConfigCache[ip]) {
-                return Promise.resolve(channelInputConfigCache[ip]);
+                return channelInputConfigCache[ip];
             }
-            return fetch('api/channel/output/universeInputs?ip=' + encodeURIComponent(ip))
-                .then(function (r) { return r.json(); })
-                .then(function (data) { channelInputConfigCache[ip] = data; return data; })
-                .catch(function () { channelInputConfigCache[ip] = null; return null; });
+            try {
+                const r = await fetch('api/channel/output/universeInputs?ip=' + encodeURIComponent(ip));
+                const data = await r.json();
+                channelInputConfigCache[ip] = data;
+                return data;
+            } catch {
+                channelInputConfigCache[ip] = null;
+                return null;
+            }
         }
 
         /**
@@ -536,7 +566,7 @@
         /**
          * Shows a Bootstrap popover with channel output/input details on an icon.
          */
-        function showChannelIOPopover(iconEl, isOutput) {
+        async function showChannelIOPopover(iconEl, isOutput) {
             var $icon = $(iconEl);
             var ip = $icon.data('ip');
             if (!ip) return;
@@ -558,15 +588,14 @@
             // Fetch and update content
             var fetchFn = isOutput ? fetchChannelOutputConfig : fetchChannelInputConfig;
             var buildFn = isOutput ? buildOutputTooltipHtml : buildInputTooltipHtml;
-            fetchFn(ip).then(function (data) {
-                var html = buildFn(data);
-                // Update the popover content
-                var tip = popover.tip;
-                if (tip) {
-                    $(tip).find('.popover-body').html(html);
-                    popover.update();
-                }
-            });
+            const data = await fetchFn(ip);
+            var html = buildFn(data);
+            // Update the popover content
+            var tip = popover.tip;
+            if (tip) {
+                $(tip).find('.popover-body').html(html);
+                popover.update();
+            }
         }
 
         // Track which IPs we've already probed for channel I/O on older systems
@@ -576,7 +605,7 @@
          * For older FPP systems that don't report channelOutputsEnabled/channelInputsEnabled,
          * fetch the remote config and add icons if active universes are found.
          */
-        function checkRemoteChannelIO(ip, rowID, data) {
+        async function checkRemoteChannelIO(ip, rowID, data) {
             if (!ip) return;
             // If the data already has the properties, getChannelIOIcons handled it
             var hasOutputProp = data && data.hasOwnProperty('channelOutputsEnabled');
@@ -615,9 +644,8 @@
                     }
                 }));
             }
-            Promise.allSettled(checks).then(function () {
-                applyChannelIOIcons(ip, rowID);
-            });
+            await Promise.allSettled(checks);
+            applyChannelIOIcons(ip, rowID);
         }
 
         /**
@@ -907,14 +935,10 @@
         // Future file: www/js/multisync/polling.js
         // ============================================================
 
-        function getFPPSystemStatus(ipAddresses, refreshing = false) {
+        async function getFPPSystemStatus(ipAddresses, refreshing = false) {
             ips = "";
             if (Array.isArray(ipAddresses)) {
-                if (refreshTimer != null) {
-                    clearTimeout(refreshTimer);
-                    delete refreshTimer;
-                    refreshTimer = null;
-                }
+                fppPoller.cancel();
                 ipAddresses.forEach(function (entry) {
                     ips += "&ip[]=" + entry;
                 });
@@ -924,11 +948,11 @@
             if (ips == "") {
                 return;
             }
-            fetch("api/system/status?type=FPP" + ips)
-                .then(function (r) { return r.json(); })
-                .then(function (alldata) {
-                    systemStatusCache = alldata;
-                    Object.entries(alldata).forEach(function (entry) {
+            try {
+                const r = await fetch("api/system/status?type=FPP" + ips);
+                const alldata = await r.json();
+                systemStatusCache = alldata;
+                Object.entries(alldata).forEach(function (entry) {
                         var ip = entry[0], data = entry[1];
                         var status = 'Idle';
                         var statusInfo = "";
@@ -1273,12 +1297,12 @@
                         }
                     });
 
-                }).finally(function () {
-                    if (Array.isArray(ipAddresses) && $('#MultiSyncRefreshStatus').is(":checked")) {
-                        refreshTimer = setTimeout(function () { getFPPSystemStatus(ipAddresses, true); }, 2000);
-                    }
                 });
-
+            } finally {
+                if (Array.isArray(ipAddresses) && $('#MultiSyncRefreshStatus').is(":checked")) {
+                    fppPoller.schedule(() => getFPPSystemStatus(ipAddresses, true));
+                }
+            }
             validateMultiSyncSettings();
         } // end of "api/system/status?ip=" + ips
 
@@ -1733,7 +1757,7 @@
         }
 
         var systemsList = [];
-        function getFPPSystems() {
+        async function getFPPSystems() {
             if (streamCount) {
                 alert("FPP Systems are being updated, you will need to manually refresh once these updates are complete.");
                 return;
@@ -1742,12 +1766,10 @@
             $('.masterOptions').hide();
             $('#fppSystems').html("<tr><td colspan=8 align='center'>Loading system list from fppd.</td></tr>");
 
-            fetch('api/fppd/multiSyncSystems')
-                .then(function (r) { return r.json(); })
-                .then(function (data) {
-                    systemsList = data.systems;
-                    parseFPPSystems(data.systems);
-                });
+            const r = await fetch('api/fppd/multiSyncSystems');
+            const data = await r.json();
+            systemsList = data.systems;
+            parseFPPSystems(data.systems);
         }
 
         // ============================================================
@@ -1904,12 +1926,8 @@
         // Future file: www/js/multisync/polling.js
         // ============================================================
 
-        function getFalconControllerStatus(fv3ips, fv4ips, refreshing = false) {
-            if (falconRefreshTimer != null) {
-                clearTimeout(falconRefreshTimer);
-                delete falconRefreshTimer;
-                falconRefreshTimer = null;
-            }
+        async function getFalconControllerStatus(fv3ips, fv4ips, refreshing = false) {
+            falconPoller.cancel();
 
             ips3 = "";
             if (Array.isArray(fv3ips)) {
@@ -1929,104 +1947,103 @@
                 ips4 = "&ip[]=" + fv4ips;
             }
 
+            const promises = [];
             if (ips3 != "") {
-                fetch("api/system/status?type=FV3" + ips3)
-                    .then(function (r) { return r.json(); })
-                    .then(function (alldata) {
-                        Object.entries(alldata).forEach(function (entry) {
-                            var ip = entry[0], data = entry[1];
-                            var ips = ip.replace(/\./g, '_');
-                            var u = "<table class='multiSyncVerboseTable'>";
-                            u += "<tr><td>Uptime:</td><td>" + data['u'] + "</td></tr>";
-                            u += "<tr><td>V1 Voltage:</td><td> " + data['v1'] + "</td></tr>";
-                            u += "<tr><td>V2 Voltage:</td><td> " + data['v2'] + "</td></tr>";
+                promises.push((async () => {
+                    const r = await fetch("api/system/status?type=FV3" + ips3);
+                    const alldata = await r.json();
+                    Object.entries(alldata).forEach(function (entry) {
+                        var ip = entry[0], data = entry[1];
+                        var ips = ip.replace(/\./g, '_');
+                        var u = "<table class='multiSyncVerboseTable'>";
+                        u += "<tr><td>Uptime:</td><td>" + data['u'] + "</td></tr>";
+                        u += "<tr><td>V1 Voltage:</td><td> " + data['v1'] + "</td></tr>";
+                        u += "<tr><td>V2 Voltage:</td><td> " + data['v2'] + "</td></tr>";
 
-                            u += "</table>";
+                        u += "</table>";
 
-                            $('#advancedViewUtilization_fpp_' + ips).html(u);
+                        $('#advancedViewUtilization_fpp_' + ips).html(u);
 
-                            var mode = $('#fpp_' + ips + '_mode').html();
+                        var mode = $('#fpp_' + ips + '_mode').html();
 
-                            if (mode == 'Bridge') {
-                                $('#fpp_' + ips + '_status').html('Bridging');
-                            } else {
-                                $('#fpp_' + ips + '_status').html('');
-                            }
-                        });
-                        if ($('#MultiSyncRefreshStatus').is(":checked")) {
-                            falconRefreshTimer = setTimeout(function () { getFalconControllerStatus(fv3ips, fv4ips, true); }, 2000);
+                        if (mode == 'Bridge') {
+                            $('#fpp_' + ips + '_status').html('Bridging');
+                        } else {
+                            $('#fpp_' + ips + '_status').html('');
                         }
                     });
+                })());
             }
             if (ips4 != "") {
-                fetch("api/system/status?type=FV4" + ips4)
-                    .then(function (r) { return r.json(); })
-                    .then(function (alldata) {
-                        Object.entries(alldata).forEach(function (entry) {
-                            var ip = entry[0], s = entry[1];
-                            var ips = ip.replace(/\./g, '_');
+                promises.push((async () => {
+                    const r = await fetch("api/system/status?type=FV4" + ips4);
+                    const alldata = await r.json();
+                    Object.entries(alldata).forEach(function (entry) {
+                        var ip = entry[0], s = entry[1];
+                        var ips = ip.replace(/\./g, '_');
 
-                            var tempthreshold = s.P.BS;
-                            var t1temp = s.P.T1 / 10;
-                            var t2temp = s.P.T2 / 10;
-                            var t1tempLabel = t1temp + "C";
+                        var tempthreshold = s.P.BS;
+                        var t1temp = s.P.T1 / 10;
+                        var t2temp = s.P.T2 / 10;
+                        var t1tempLabel = t1temp + "C";
 
-                            if (settings['temperatureInF'] == 1) {
-                                t1temp = Math.round((t1temp * 9 / 5) + 32);
-                                t2temp = Math.round((t2temp * 9 / 5) + 32);
-                                tempthreshold = Math.round((tempthreshold * 9 / 5) + 32);
-                                t1tempLabel = t1temp + "F";
-                            }
+                        if (settings['temperatureInF'] == 1) {
+                            t1temp = Math.round((t1temp * 9 / 5) + 32);
+                            t2temp = Math.round((t2temp * 9 / 5) + 32);
+                            tempthreshold = Math.round((tempthreshold * 9 / 5) + 32);
+                            t1tempLabel = t1temp + "F";
+                        }
 
-                            var v1voltage = s.P.V1 / 10;
-                            var v2voltage = s.P.V2 / 10;
+                        var v1voltage = s.P.V1 / 10;
+                        var v2voltage = s.P.V2 / 10;
 
-                            var testmode = new Boolean(s.P.TS);
-                            var overtemp = new Boolean(Math.max(t1temp, t2temp) > tempthreshold);
+                        var testmode = new Boolean(s.P.TS);
+                        var overtemp = new Boolean(Math.max(t1temp, t2temp) > tempthreshold);
 
-                            var t = parseInt(s.P.U);
-                            var days = Math.floor(t / 86400);
-                            var hours = Math.floor((t - 86400 * days) / 3600);
-                            var mins = Math.floor((t - 86400 * days - 3600 * hours) / 60);
+                        var t = parseInt(s.P.U);
+                        var days = Math.floor(t / 86400);
+                        var hours = Math.floor((t - 86400 * days) / 3600);
+                        var mins = Math.floor((t - 86400 * days - 3600 * hours) / 60);
 
-                            var uptime = '';
+                        var uptime = '';
 
-                            uptime += (days + " days, ");
-                            uptime += ("0" + hours).slice(-2) + ":";
-                            uptime += ("0" + mins).slice(-2);
+                        uptime += (days + " days, ");
+                        uptime += ("0" + hours).slice(-2) + ":";
+                        uptime += ("0" + mins).slice(-2);
 
-                            var u = "<table class='multiSyncVerboseTable'>";
-                            u += "<tr><td>Uptime:</td><td>" + uptime + "</td></tr>";
-                            u += "<tr><td>V1 Voltage:</td><td> " + v1voltage + "v</td></tr>";
-                            if (s.P.BR != 48) {
-                                u += "<tr><td>V2 Voltage:</td><td> " + v2voltage + "v</td></tr>";
-                            }
-                            u += "<tr><td>Temp:</td><td> " + t1tempLabel + "</td></tr>";
-                            u += "</table>";
+                        var u = "<table class='multiSyncVerboseTable'>";
+                        u += "<tr><td>Uptime:</td><td>" + uptime + "</td></tr>";
+                        u += "<tr><td>V1 Voltage:</td><td> " + v1voltage + "v</td></tr>";
+                        if (s.P.BR != 48) {
+                            u += "<tr><td>V2 Voltage:</td><td> " + v2voltage + "v</td></tr>";
+                        }
+                        u += "<tr><td>Temp:</td><td> " + t1tempLabel + "</td></tr>";
+                        u += "</table>";
 
-                            var hostRowKey = ip.replace(/\./g, '_');
-                            var rowId = hostRows[hostRowKey];
+                        var hostRowKey = ip.replace(/\./g, '_');
+                        var rowId = hostRows[hostRowKey];
 
-                            $('#advancedViewUtilization_' + rowId).html(u);
-                            $('#' + rowId + '_status').html(s.status_name);
+                        $('#advancedViewUtilization_' + rowId).html(u);
+                        $('#' + rowId + '_status').html(s.status_name);
 
-                            if (testmode == true || overtemp == true) {
-                                $('#' + rowId + '_warnings').removeAttr('style'); // Remove 'display: none' style
-                                // Ensure child rows match parent striping color
-                                if ($('#' + rowId).hasClass('odd'))
-                                    $('#' + rowId + '_warnings').addClass('odd');
+                        if (testmode == true || overtemp == true) {
+                            $('#' + rowId + '_warnings').removeAttr('style'); // Remove 'display: none' style
+                            // Ensure child rows match parent striping color
+                            if ($('#' + rowId).hasClass('odd'))
+                                $('#' + rowId + '_warnings').addClass('odd');
 
-                                var wHTML = "";
-                                if (testmode == true) wHTML += "<span class='warning-text'>Controller Test mode is active</span><br>";
-                                if (overtemp == true) wHTML += "<span class='warning-text'>Pixel brightness reduced due to high temperatures</span><br>";
+                            var wHTML = "";
+                            if (testmode == true) wHTML += "<span class='warning-text'>Controller Test mode is active</span><br>";
+                            if (overtemp == true) wHTML += "<span class='warning-text'>Pixel brightness reduced due to high temperatures</span><br>";
 
-                                $('#' + rowId + '_warningCell').html(wHTML);
-                            }
-                        });
-                        if ($('#MultiSyncRefreshStatus').is(":checked")) {
-                            falconRefreshTimer = setTimeout(function () { getFalconControllerStatus(fv3ips, fv4ips, true); }, 2000);
+                            $('#' + rowId + '_warningCell').html(wHTML);
                         }
                     });
+                })());
+            }
+            await Promise.allSettled(promises);
+            if ($('#MultiSyncRefreshStatus').is(":checked")) {
+                falconPoller.schedule(() => getFalconControllerStatus(fv3ips, fv4ips, true));
             }
         }
 
@@ -2035,14 +2052,10 @@
         // Future file: www/js/multisync/polling.js
         // ============================================================
 
-        function getWLEDControllerStatus(ipAddresses, refreshing = false) {
+        async function getWLEDControllerStatus(ipAddresses, refreshing = false) {
             ips = "";
             if (Array.isArray(ipAddresses)) {
-                if (wledRefreshTimer != null) {
-                    clearTimeout(wledRefreshTimer);
-                    delete wledRefreshTimer;
-                    wledRefreshTimer = null;
-                }
+                wledPoller.cancel();
                 ipAddresses.forEach(function (entry) {
                     ips += "&ip[]=" + entry;
                 });
@@ -2052,45 +2065,45 @@
             if (ips == "") {
                 return;
             }
-            fetch("api/system/status?type=WLED" + ips)
-                .then(function (r) { return r.json(); })
-                .then(function (alldata) {
-                    Object.entries(alldata).forEach(function (entry) {
-                        var ip = entry[0], data = entry[1];
-                        if (data == null || data == "" || data == "null") {
-                            return;
-                        }
-                        var ips = ip.replace(/\./g, '_');
-                        var rssi = data.wifi.rssi;
-                        var quality = data.wifi.signal;
-
-                        var t = parseInt(data.uptime);
-                        var days = Math.floor(t / 86400);
-                        var hours = Math.floor((t - 86400 * days) / 3600);
-                        var mins = Math.floor((t - 86400 * days - 3600 * hours) / 60);
-
-                        var uptime = '';
-
-                        uptime += (days + " days, ");
-                        uptime += ("0" + hours).slice(-2) + ":";
-                        uptime += ("0" + mins).slice(-2);
-
-                        var u = "<table class='multiSyncVerboseTable'>";
-                        u += "<tr><td>RSSI:</td><td>" + rssi + "dBm / " + quality + "%</td></tr>";
-                        u += "<tr><td>Uptime:</td><td>" + uptime + "</td></tr>";
-                        u += "</table>";
-
-                        var hostRowKey = ip.replace(/\./g, '_');
-                        var rowId = hostRows[hostRowKey];
-
-                        $('#advancedViewUtilization_' + rowId).html(u);
-                        $('#' + rowId + '_status').html(data.status_name);
-                    });
-
-                    if (Array.isArray(ipAddresses) && $('#MultiSyncRefreshStatus').is(":checked")) {
-                        wledRefreshTimer = setTimeout(function () { getWLEDControllerStatus(ipAddresses, true); }, 2000);
+            try {
+                const r = await fetch("api/system/status?type=WLED" + ips);
+                const alldata = await r.json();
+                Object.entries(alldata).forEach(function (entry) {
+                    var ip = entry[0], data = entry[1];
+                    if (data == null || data == "" || data == "null") {
+                        return;
                     }
+                    var ips = ip.replace(/\./g, '_');
+                    var rssi = data.wifi.rssi;
+                    var quality = data.wifi.signal;
+
+                    var t = parseInt(data.uptime);
+                    var days = Math.floor(t / 86400);
+                    var hours = Math.floor((t - 86400 * days) / 3600);
+                    var mins = Math.floor((t - 86400 * days - 3600 * hours) / 60);
+
+                    var uptime = '';
+
+                    uptime += (days + " days, ");
+                    uptime += ("0" + hours).slice(-2) + ":";
+                    uptime += ("0" + mins).slice(-2);
+
+                    var u = "<table class='multiSyncVerboseTable'>";
+                    u += "<tr><td>RSSI:</td><td>" + rssi + "dBm / " + quality + "%</td></tr>";
+                    u += "<tr><td>Uptime:</td><td>" + uptime + "</td></tr>";
+                    u += "</table>";
+
+                    var hostRowKey = ip.replace(/\./g, '_');
+                    var rowId = hostRows[hostRowKey];
+
+                    $('#advancedViewUtilization_' + rowId).html(u);
+                    $('#' + rowId + '_status').html(data.status_name);
                 });
+            } finally {
+                if (Array.isArray(ipAddresses) && $('#MultiSyncRefreshStatus').is(":checked")) {
+                    wledPoller.schedule(() => getWLEDControllerStatus(ipAddresses, true));
+                }
+            }
         }
 
         // ============================================================
@@ -2098,14 +2111,10 @@
         // Future file: www/js/multisync/polling.js
         // ============================================================
 
-        function getGeniusControllerStatus(ipAddresses, refreshing = false) {
+        async function getGeniusControllerStatus(ipAddresses, refreshing = false) {
             ips = "";
             if (Array.isArray(ipAddresses)) {
-                if (geniusRefreshTimer != null) {
-                    clearTimeout(geniusRefreshTimer);
-                    delete geniusRefreshTimer;
-                    geniusRefreshTimer = null;
-                }
+                geniusPoller.cancel();
                 ipAddresses.forEach(function (entry) {
                     ips += "&ip[]=" + entry;
                 });
@@ -2115,45 +2124,45 @@
             if (ips == "") {
                 return;
             }
-            fetch("api/system/status?type=Genius" + ips)
-                .then(function (r) { return r.json(); })
-                .then(function (alldata) {
-                    Object.entries(alldata).forEach(function (entry) {
-                        var ip = entry[0], data = entry[1];
-                        if (data == null || data == "" || data == "null") {
-                            return;
-                        }
-                        var ips = ip.replace(/\./g, '_');
-                        var t = data.system.uptime_seconds;
-                        var days = Math.floor(t / 86400);
-                        var hours = Math.floor((t - 86400 * days) / 3600);
-                        var mins = Math.floor((t - 86400 * days - 3600 * hours) / 60);
-
-                        var uptime = '';
-                        uptime += (days + " days, ");
-                        uptime += ("0" + hours).slice(-2) + ":";
-                        uptime += ("0" + mins).slice(-2);
-
-                        var u = "<table class='multiSyncVerboseTable'>";
-                        //u += "<tr><td>RSSI:</td><td>" + rssi + "dBm / " + quality + "%</td></tr>";
-                        u += "<tr><td>Uptime:</td><td>" + uptime + "</td></tr>";
-                        u += "</table>";
-
-                        var hostRowKey = ip.replace(/\./g, '_');
-                        var rowId = hostRows[hostRowKey];
-                        $('#advancedViewUtilization_' + rowId).html(u);
-
-                        var origDesc = $('#' + rowId + '_desc').html();
-                        if (origDesc == '') {
-                            $('#' + rowId + '_desc').html(data.system.friendly_name);
-                        }
-                        $('#' + rowId + '_status').html(data.status_name);
-                    });
-
-                    if (Array.isArray(ipAddresses) && $('#MultiSyncRefreshStatus').is(":checked")) {
-                        geniusRefreshTimer = setTimeout(function () { getGeniusControllerStatus(ipAddresses, true); }, 2000);
+            try {
+                const r = await fetch("api/system/status?type=Genius" + ips);
+                const alldata = await r.json();
+                Object.entries(alldata).forEach(function (entry) {
+                    var ip = entry[0], data = entry[1];
+                    if (data == null || data == "" || data == "null") {
+                        return;
                     }
+                    var ips = ip.replace(/\./g, '_');
+                    var t = data.system.uptime_seconds;
+                    var days = Math.floor(t / 86400);
+                    var hours = Math.floor((t - 86400 * days) / 3600);
+                    var mins = Math.floor((t - 86400 * days - 3600 * hours) / 60);
+
+                    var uptime = '';
+                    uptime += (days + " days, ");
+                    uptime += ("0" + hours).slice(-2) + ":";
+                    uptime += ("0" + mins).slice(-2);
+
+                    var u = "<table class='multiSyncVerboseTable'>";
+                    //u += "<tr><td>RSSI:</td><td>" + rssi + "dBm / " + quality + "%</td></tr>";
+                    u += "<tr><td>Uptime:</td><td>" + uptime + "</td></tr>";
+                    u += "</table>";
+
+                    var hostRowKey = ip.replace(/\./g, '_');
+                    var rowId = hostRows[hostRowKey];
+                    $('#advancedViewUtilization_' + rowId).html(u);
+
+                    var origDesc = $('#' + rowId + '_desc').html();
+                    if (origDesc == '') {
+                        $('#' + rowId + '_desc').html(data.system.friendly_name);
+                    }
+                    $('#' + rowId + '_status').html(data.status_name);
                 });
+            } finally {
+                if (Array.isArray(ipAddresses) && $('#MultiSyncRefreshStatus').is(":checked")) {
+                    geniusPoller.schedule(() => getGeniusControllerStatus(ipAddresses, true));
+                }
+            }
         }
 
         // ============================================================
@@ -2161,14 +2170,10 @@
         // Future file: www/js/multisync/polling.js
         // ============================================================
 
-        function getBaldrickControllerStatus(ipAddresses, refreshing = false) {
+        async function getBaldrickControllerStatus(ipAddresses, refreshing = false) {
             ips = "";
             if (Array.isArray(ipAddresses)) {
-                if (baldrickRefreshTimer != null) {
-                    clearTimeout(baldrickRefreshTimer);
-                    delete baldrickRefreshTimer;
-                    baldrickRefreshTimer = null;
-                }
+                baldrickPoller.cancel();
                 ipAddresses.forEach(function (entry) {
                     ips += "&ip[]=" + entry;
                 });
@@ -2178,65 +2183,65 @@
             if (ips == "") {
                 return;
             }
-            fetch("api/system/status?type=Baldrick" + ips)
-                .then(function (r) { return r.json(); })
-                .then(function (alldata) {
-                    Object.entries(alldata).forEach(function (entry) {
-                        var ip = entry[0], data = entry[1];
-                        if (data == null || data == "" || data == "null") {
-                            return;
+            try {
+                const r = await fetch("api/system/status?type=Baldrick" + ips);
+                const alldata = await r.json();
+                Object.entries(alldata).forEach(function (entry) {
+                    var ip = entry[0], data = entry[1];
+                    if (data == null || data == "" || data == "null") {
+                        return;
+                    }
+                    var ips = ip.replace(/\./g, '_');
+                    var t = data.uptime;
+                    var days = Math.floor(t / 86400);
+                    var hours = Math.floor((t - 86400 * days) / 3600);
+                    var mins = Math.floor((t - 86400 * days - 3600 * hours) / 60);
+
+                    var uptime = '';
+                    uptime += (days + " days, ");
+                    uptime += ("0" + hours).slice(-2) + ":";
+                    uptime += ("0" + mins).slice(-2);
+
+                    var u = "<table class='multiSyncVerboseTable'>";
+                    u += "<tr><td>Up:</td><td>" + uptime + "</td></tr>";
+                    u += "</table>";
+
+                    var hostRowKey = ip.replace(/\./g, '_');
+                    var rowId = hostRows[hostRowKey];
+                    $('#advancedViewUtilization_' + rowId).html(u);
+
+                    var origDesc = $('#' + rowId + '_desc').html();
+                    if (origDesc == '') {
+                        $('#' + rowId + '_desc').html(data.board_model || data.hostname);
+                    }
+
+                    // Set status based on test mode
+                    var status = 'Idle';
+                    if (data.test_mode_active) {
+                        status = 'Testing';
+                    } else if (data.frame_rate && data.frame_rate > 0) {
+                        status = 'Playing';
+                    }
+                    $('#' + rowId + '_status').html(status);
+
+                    // Check for firmware update available
+                    var versionCell = $('#' + rowId + '_version');
+                    if (data.ota && data.ota.current_firmware_version && data.ota.available_firmware_version) {
+                        var current = data.ota.current_firmware_version;
+                        var available = data.ota.available_firmware_version;
+                        if (current !== available) {
+                            versionCell.html('<span class="text-warning" title="Update available: ' + available + '">' +
+                                current + ' <i class="fas fa-exclamation-triangle"></i></span>');
+                        } else {
+                            versionCell.html(current);
                         }
-                        var ips = ip.replace(/\./g, '_');
-                        var t = data.uptime;
-                        var days = Math.floor(t / 86400);
-                        var hours = Math.floor((t - 86400 * days) / 3600);
-                        var mins = Math.floor((t - 86400 * days - 3600 * hours) / 60);
-
-                        var uptime = '';
-                        uptime += (days + " days, ");
-                        uptime += ("0" + hours).slice(-2) + ":";
-                        uptime += ("0" + mins).slice(-2);
-
-                        var u = "<table class='multiSyncVerboseTable'>";
-                        u += "<tr><td>Up:</td><td>" + uptime + "</td></tr>";
-                        u += "</table>";
-
-                        var hostRowKey = ip.replace(/\./g, '_');
-                        var rowId = hostRows[hostRowKey];
-                        $('#advancedViewUtilization_' + rowId).html(u);
-
-                        var origDesc = $('#' + rowId + '_desc').html();
-                        if (origDesc == '') {
-                            $('#' + rowId + '_desc').html(data.board_model || data.hostname);
-                        }
-
-                        // Set status based on test mode
-                        var status = 'Idle';
-                        if (data.test_mode_active) {
-                            status = 'Testing';
-                        } else if (data.frame_rate && data.frame_rate > 0) {
-                            status = 'Playing';
-                        }
-                        $('#' + rowId + '_status').html(status);
-
-                        // Check for firmware update available
-                        var versionCell = $('#' + rowId + '_version');
-                        if (data.ota && data.ota.current_firmware_version && data.ota.available_firmware_version) {
-                            var current = data.ota.current_firmware_version;
-                            var available = data.ota.available_firmware_version;
-                            if (current !== available) {
-                                versionCell.html('<span class="text-warning" title="Update available: ' + available + '">' +
-                                    current + ' <i class="fas fa-exclamation-triangle"></i></span>');
-                            } else {
-                                versionCell.html(current);
-                            }
-                        }
-                    });
-
-                    if (Array.isArray(ipAddresses) && $('#MultiSyncRefreshStatus').is(":checked")) {
-                        baldrickRefreshTimer = setTimeout(function () { getBaldrickControllerStatus(ipAddresses, true); }, 2000);
                     }
                 });
+            } finally {
+                if (Array.isArray(ipAddresses) && $('#MultiSyncRefreshStatus').is(":checked")) {
+                    baldrickPoller.schedule(() => getBaldrickControllerStatus(ipAddresses, true));
+                }
+            }
         }
 
         // ============================================================
@@ -2245,15 +2250,11 @@
         // ============================================================
 
         function clearRefreshTimers() {
-            clearTimeout(refreshTimer);
-            clearTimeout(geniusRefreshTimer);
-            clearTimeout(wledRefreshTimer);
-            clearTimeout(baldrickRefreshTimer);
-            clearTimeout(falconRefreshTimer);
-            refreshTimer = null;
-            geniusRefreshTimer = null;
-            wledRefreshTimer = null;
-            falconRefreshTimer = null;
+            fppPoller.cancel();
+            falconPoller.cancel();
+            wledPoller.cancel();
+            geniusPoller.cancel();
+            baldrickPoller.cancel();
         }
 
         function RefreshStats() {
@@ -2351,11 +2352,10 @@
         // Future file: www/js/multisync/actions.js
         // ============================================================
 
-        function getLocalFpposFiles() {
-            fetch('api/files/uploads')
-                .then(function (r) { return r.json(); })
-                .then(function (data) {
-                if (data.hasOwnProperty("files")) {
+        async function getLocalFpposFiles() {
+            const r = await fetch('api/files/uploads');
+            const data = await r.json();
+            if (data.hasOwnProperty("files")) {
                     data.files.forEach(function (f) {
                         if (f.hasOwnProperty("name")) {
                             if (f.name.endsWith(".fppos")) {
@@ -2398,8 +2398,7 @@
                         });
                         $("#copyOSOptionsDetails").html(html.join(''));
                     }
-                } // hasOwnProperty("files");
-            });
+            } // hasOwnProperty("files");
         }
 
         /**
@@ -2486,28 +2485,24 @@
                 warningDiv.html('Unable to find IP address for selected systems. Please ensure at least one system is selected and not filtered out.');
             } else {
                 var foundFiles = false;
-                var checkNextIp = function (index) {
-                    if (foundFiles || index >= ips.length) {
-                        return;
-                    }
-
+                var checkNextIp = async function (index) {
+                    if (foundFiles || index >= ips.length) return;
                     var ip = ips[index];
                     warningDiv.html('Please Wait... Checking ' + ip + ' for OS Upgrade files...');
-                    fetch('api/remoteAction?ip=' + ip + '&action=listUpgrades')
-                        .then(function (r) { return r.json(); })
-                        .then(function (data) {
-                            if (data && Array.isArray(data.files) && data.files.length > 0) {
-                                foundFiles = true;
-                                warningDiv.html('');
-                                updateOSFileList(data.files);
-                            } else {
-                                checkNextIp(index + 1);
-                            }
-                        })
-                        .catch(function (error) {
-                            console.error('Error querying ' + ip + ':', error);
-                            checkNextIp(index + 1);
-                        });
+                    try {
+                        const r = await fetch('api/remoteAction?ip=' + ip + '&action=listUpgrades');
+                        const data = await r.json();
+                        if (data && Array.isArray(data.files) && data.files.length > 0) {
+                            foundFiles = true;
+                            warningDiv.html('');
+                            updateOSFileList(data.files);
+                        } else {
+                            await checkNextIp(index + 1);
+                        }
+                    } catch (error) {
+                        console.error('Error querying ' + ip + ':', error);
+                        await checkNextIp(index + 1);
+                    }
                 };
                 checkNextIp(0);
             }
@@ -2889,16 +2884,14 @@
             var remote = $("#branchRemoteSelect").length ? $("#branchRemoteSelect").val() : 'origin';
             StreamURL('changeRemoteBranch.php?branch=' + encodeURIComponent(branch) + '&remote=' + encodeURIComponent(remote) + '&ip=' + ip, rowID + '_logText', 'actionDone', 'actionFailed');
         }
-        function reloadBranchSelect() {
+        async function reloadBranchSelect() {
             var remote = $("#branchRemoteSelect").length ? $("#branchRemoteSelect").val() : 'origin';
-            fetch("api/git/branches?remote=" + encodeURIComponent(remote))
-                .then(function (r) { return r.json(); })
-                .then(function (data) {
-                    $('#branchSelect').empty();
-                    data.forEach(function (item) {
-                        $('#branchSelect').append($('<option>', { value: item, text: item }));
-                    });
-                });
+            const r = await fetch("api/git/branches?remote=" + encodeURIComponent(remote));
+            const data = await r.json();
+            $('#branchSelect').empty();
+            data.forEach(function (item) {
+                $('#branchSelect').append($('<option>', { value: item, text: item }));
+            });
         }
         function changeBranchSelectedSystems() {
             $('input.remoteCheckbox').each(function () {
@@ -3067,11 +3060,14 @@
         // Future file: www/js/multisync/actions.js
         // ============================================================
 
-        function addProxyForIP(rowID) {
+        async function addProxyForIP(rowID) {
             var ip = ipFromRowID(rowID);
-            fetch("api/proxies/" + ip, { method: 'POST', body: "AddProxy" })
-                .then(function (r) { if (!r.ok) throw new Error(r.status); })
-                .catch(function () { DialogError("Failed to set Proxy", "Post failed"); });
+            try {
+                const r = await fetch("api/proxies/" + ip, { method: 'POST', body: "AddProxy" });
+                if (!r.ok) throw new Error(r.status);
+            } catch {
+                DialogError("Failed to set Proxy", "Post failed");
+            }
         }
 
         function proxySelectedIPs() {
@@ -3178,7 +3174,7 @@
             });
         }
 
-        function updateMultiSyncRemotes(verbose = false) {
+        async function updateMultiSyncRemotes(verbose = false) {
             var remotes = "";
 
             $('input.syncCheckbox').each(function () {
@@ -3200,29 +3196,30 @@
                 alert('FPP will use multicast if no other sync methods are chosen.');
             }
 
-            fetch("api/settings/MultiSyncRemotes", { method: 'PUT', body: JSON.stringify(remotes), headers: { 'Content-Type': 'application/json' } })
-                .then(function (r) { if (!r.ok) throw new Error(r.status); })
-                .then(function () {
-                    settings['MultiSyncRemotes'] = remotes;
-                    if (verbose) {
-                        if (remotes == "") {
-                            $.jGrowl("Remote List Cleared.  You must restart fppd for the changes to take effect.", { themeState: 'success' });
-                        } else {
-                            $.jGrowl("Remote List set to: '" + remotes + "'.  You must restart fppd for the changes to take effect.", { themeState: 'success' });
-                        }
-                    }
-
-                    //Mark FPPD as needing restart
-                    SetRestartFlag(2);
-                    settings['restartFlag'] = 2;
-                    //Get the resart banner showing
-                    CheckRestartRebootFlags();
-                    validateMultiSyncSettings();
-                })
-                .catch(function () {
-                    DialogError("Save Remotes", "Save Failed");
+            try {
+                const r = await fetch("api/settings/MultiSyncRemotes", {
+                    method: 'PUT',
+                    body: JSON.stringify(remotes),
+                    headers: { 'Content-Type': 'application/json' }
                 });
-
+                if (!r.ok) throw new Error(r.status);
+                settings['MultiSyncRemotes'] = remotes;
+                if (verbose) {
+                    if (remotes == "") {
+                        $.jGrowl("Remote List Cleared.  You must restart fppd for the changes to take effect.", { themeState: 'success' });
+                    } else {
+                        $.jGrowl("Remote List set to: '" + remotes + "'.  You must restart fppd for the changes to take effect.", { themeState: 'success' });
+                    }
+                }
+                //Mark FPPD as needing restart
+                SetRestartFlag(2);
+                settings['restartFlag'] = 2;
+                //Get the resart banner showing
+                CheckRestartRebootFlags();
+                validateMultiSyncSettings();
+            } catch {
+                DialogError("Save Remotes", "Save Failed");
+            }
         }
 
         function exportMultisync() {
