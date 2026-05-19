@@ -448,15 +448,12 @@
          */
         function fetchChannelOutputConfig(ip) {
             if (channelOutputConfigCache[ip]) {
-                return $.Deferred().resolve(channelOutputConfigCache[ip]).promise();
+                return Promise.resolve(channelOutputConfigCache[ip]);
             }
-            return $.get('api/channel/output/universeOutputs', { ip: ip }).then(function (data) {
-                channelOutputConfigCache[ip] = data;
-                return data;
-            }).fail(function () {
-                channelOutputConfigCache[ip] = null;
-                return null;
-            });
+            return fetch('api/channel/output/universeOutputs?ip=' + encodeURIComponent(ip))
+                .then(function (r) { return r.json(); })
+                .then(function (data) { channelOutputConfigCache[ip] = data; return data; })
+                .catch(function () { channelOutputConfigCache[ip] = null; return null; });
         }
 
         /**
@@ -464,15 +461,12 @@
          */
         function fetchChannelInputConfig(ip) {
             if (channelInputConfigCache[ip]) {
-                return $.Deferred().resolve(channelInputConfigCache[ip]).promise();
+                return Promise.resolve(channelInputConfigCache[ip]);
             }
-            return $.get('api/channel/output/universeInputs', { ip: ip }).then(function (data) {
-                channelInputConfigCache[ip] = data;
-                return data;
-            }).fail(function () {
-                channelInputConfigCache[ip] = null;
-                return null;
-            });
+            return fetch('api/channel/output/universeInputs?ip=' + encodeURIComponent(ip))
+                .then(function (r) { return r.json(); })
+                .then(function (data) { channelInputConfigCache[ip] = data; return data; })
+                .catch(function () { channelInputConfigCache[ip] = null; return null; });
         }
 
         /**
@@ -621,7 +615,7 @@
                     }
                 }));
             }
-            $.when.apply($, checks).always(function () {
+            Promise.allSettled(checks).then(function () {
                 applyChannelIOIcons(ip, rowID);
             });
         }
@@ -930,10 +924,12 @@
             if (ips == "") {
                 return;
             }
-            $.get("api/system/status?type=FPP" + ips)
-                .done(function (alldata) {
+            fetch("api/system/status?type=FPP" + ips)
+                .then(function (r) { return r.json(); })
+                .then(function (alldata) {
                     systemStatusCache = alldata;
-                    jQuery.each(alldata, function (ip, data) {
+                    Object.entries(alldata).forEach(function (entry) {
+                        var ip = entry[0], data = entry[1];
                         var status = 'Idle';
                         var statusInfo = "";
                         var elapsed = "";
@@ -1277,7 +1273,7 @@
                         }
                     });
 
-                }).always(function () {
+                }).finally(function () {
                     if (Array.isArray(ipAddresses) && $('#MultiSyncRefreshStatus').is(":checked")) {
                         refreshTimer = setTimeout(function () { getFPPSystemStatus(ipAddresses, true); }, 2000);
                     }
@@ -1746,10 +1742,12 @@
             $('.masterOptions').hide();
             $('#fppSystems').html("<tr><td colspan=8 align='center'>Loading system list from fppd.</td></tr>");
 
-            $.get('api/fppd/multiSyncSystems', function (data) {
-                systemsList = data.systems;
-                parseFPPSystems(data.systems);
-            });
+            fetch('api/fppd/multiSyncSystems')
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    systemsList = data.systems;
+                    parseFPPSystems(data.systems);
+                });
         }
 
         // ============================================================
@@ -1932,9 +1930,11 @@
             }
 
             if (ips3 != "") {
-                $.get("api/system/status?type=FV3" + ips3)
-                    .done(function (alldata) {
-                        jQuery.each(alldata, function (ip, data) {
+                fetch("api/system/status?type=FV3" + ips3)
+                    .then(function (r) { return r.json(); })
+                    .then(function (alldata) {
+                        Object.entries(alldata).forEach(function (entry) {
+                            var ip = entry[0], data = entry[1];
                             var ips = ip.replace(/\./g, '_');
                             var u = "<table class='multiSyncVerboseTable'>";
                             u += "<tr><td>Uptime:</td><td>" + data['u'] + "</td></tr>";
@@ -1956,13 +1956,14 @@
                         if ($('#MultiSyncRefreshStatus').is(":checked")) {
                             falconRefreshTimer = setTimeout(function () { getFalconControllerStatus(fv3ips, fv4ips, true); }, 2000);
                         }
-
                     });
             }
             if (ips4 != "") {
-                $.get("api/system/status?type=FV4" + ips4)
-                    .done(function (alldata) {
-                        jQuery.each(alldata, function (ip, s) {
+                fetch("api/system/status?type=FV4" + ips4)
+                    .then(function (r) { return r.json(); })
+                    .then(function (alldata) {
+                        Object.entries(alldata).forEach(function (entry) {
+                            var ip = entry[0], s = entry[1];
                             var ips = ip.replace(/\./g, '_');
 
                             var tempthreshold = s.P.BS;
@@ -2051,9 +2052,11 @@
             if (ips == "") {
                 return;
             }
-            $.get("api/system/status?type=WLED" + ips)
-                .done(function (alldata) {
-                    jQuery.each(alldata, function (ip, data) {
+            fetch("api/system/status?type=WLED" + ips)
+                .then(function (r) { return r.json(); })
+                .then(function (alldata) {
+                    Object.entries(alldata).forEach(function (entry) {
+                        var ip = entry[0], data = entry[1];
                         if (data == null || data == "" || data == "null") {
                             return;
                         }
@@ -2112,9 +2115,11 @@
             if (ips == "") {
                 return;
             }
-            $.get("api/system/status?type=Genius" + ips)
-                .done(function (alldata) {
-                    jQuery.each(alldata, function (ip, data) {
+            fetch("api/system/status?type=Genius" + ips)
+                .then(function (r) { return r.json(); })
+                .then(function (alldata) {
+                    Object.entries(alldata).forEach(function (entry) {
+                        var ip = entry[0], data = entry[1];
                         if (data == null || data == "" || data == "null") {
                             return;
                         }
@@ -2173,9 +2178,11 @@
             if (ips == "") {
                 return;
             }
-            $.get("api/system/status?type=Baldrick" + ips)
-                .done(function (alldata) {
-                    jQuery.each(alldata, function (ip, data) {
+            fetch("api/system/status?type=Baldrick" + ips)
+                .then(function (r) { return r.json(); })
+                .then(function (alldata) {
+                    Object.entries(alldata).forEach(function (entry) {
+                        var ip = entry[0], data = entry[1];
                         if (data == null || data == "" || data == "null") {
                             return;
                         }
@@ -2345,7 +2352,9 @@
         // ============================================================
 
         function getLocalFpposFiles() {
-            $.get('api/files/uploads', function (data) {
+            fetch('api/files/uploads')
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
                 if (data.hasOwnProperty("files")) {
                     data.files.forEach(function (f) {
                         if (f.hasOwnProperty("name")) {
@@ -2484,20 +2493,18 @@
 
                     var ip = ips[index];
                     warningDiv.html('Please Wait... Checking ' + ip + ' for OS Upgrade files...');
-                    $.ajax({
-                        url: 'api/remoteAction?ip=' + ip + '&action=listUpgrades',
-                        type: 'GET',
-                        dataType: 'json'
-                    }).done(function (data) {
-                        if (data && Array.isArray(data.files) && data.files.length > 0) {
-                            foundFiles = true;
-                            warningDiv.html('');
-                            updateOSFileList(data.files);
-                        } else {
-                            checkNextIp(index + 1);
-                        }
-                    })
-                        .fail(function (error) {
+                    fetch('api/remoteAction?ip=' + ip + '&action=listUpgrades')
+                        .then(function (r) { return r.json(); })
+                        .then(function (data) {
+                            if (data && Array.isArray(data.files) && data.files.length > 0) {
+                                foundFiles = true;
+                                warningDiv.html('');
+                                updateOSFileList(data.files);
+                            } else {
+                                checkNextIp(index + 1);
+                            }
+                        })
+                        .catch(function (error) {
                             console.error('Error querying ' + ip + ':', error);
                             checkNextIp(index + 1);
                         });
@@ -2884,15 +2891,14 @@
         }
         function reloadBranchSelect() {
             var remote = $("#branchRemoteSelect").length ? $("#branchRemoteSelect").val() : 'origin';
-            $.get("api/git/branches?remote=" + encodeURIComponent(remote), function (data) {
-                $('#branchSelect').empty();
-                $.each(data, function (i, item) {
-                    $('#branchSelect').append($('<option>', {
-                        value: item,
-                        text: item
-                    }));
+            fetch("api/git/branches?remote=" + encodeURIComponent(remote))
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    $('#branchSelect').empty();
+                    data.forEach(function (item) {
+                        $('#branchSelect').append($('<option>', { value: item, text: item }));
+                    });
                 });
-            });
         }
         function changeBranchSelectedSystems() {
             $('input.remoteCheckbox').each(function () {
@@ -3063,10 +3069,9 @@
 
         function addProxyForIP(rowID) {
             var ip = ipFromRowID(rowID);
-            $.post("api/proxies/" + ip, "AddProxy").done(function (data) {
-            }).fail(function (data) {
-                DialogError("Failed to set Proxy", "Post failed");
-            });
+            fetch("api/proxies/" + ip, { method: 'POST', body: "AddProxy" })
+                .then(function (r) { if (!r.ok) throw new Error(r.status); })
+                .catch(function () { DialogError("Failed to set Proxy", "Post failed"); });
         }
 
         function proxySelectedIPs() {
@@ -3195,26 +3200,28 @@
                 alert('FPP will use multicast if no other sync methods are chosen.');
             }
 
-            $.put("api/settings/MultiSyncRemotes", remotes
-            ).done(function () {
-                settings['MultiSyncRemotes'] = remotes;
-                if (verbose) {
-                    if (remotes == "") {
-                        $.jGrowl("Remote List Cleared.  You must restart fppd for the changes to take effect.", { themeState: 'success' });
-                    } else {
-                        $.jGrowl("Remote List set to: '" + remotes + "'.  You must restart fppd for the changes to take effect.", { themeState: 'success' });
+            fetch("api/settings/MultiSyncRemotes", { method: 'PUT', body: JSON.stringify(remotes), headers: { 'Content-Type': 'application/json' } })
+                .then(function (r) { if (!r.ok) throw new Error(r.status); })
+                .then(function () {
+                    settings['MultiSyncRemotes'] = remotes;
+                    if (verbose) {
+                        if (remotes == "") {
+                            $.jGrowl("Remote List Cleared.  You must restart fppd for the changes to take effect.", { themeState: 'success' });
+                        } else {
+                            $.jGrowl("Remote List set to: '" + remotes + "'.  You must restart fppd for the changes to take effect.", { themeState: 'success' });
+                        }
                     }
-                }
 
-                //Mark FPPD as needing restart
-                SetRestartFlag(2);
-                settings['restartFlag'] = 2;
-                //Get the resart banner showing
-                CheckRestartRebootFlags();
-                validateMultiSyncSettings();
-            }).fail(function () {
-                DialogError("Save Remotes", "Save Failed");
-            });
+                    //Mark FPPD as needing restart
+                    SetRestartFlag(2);
+                    settings['restartFlag'] = 2;
+                    //Get the resart banner showing
+                    CheckRestartRebootFlags();
+                    validateMultiSyncSettings();
+                })
+                .catch(function () {
+                    DialogError("Save Remotes", "Save Failed");
+                });
 
         }
 
@@ -3610,29 +3617,28 @@
                 }
             });
 
-            $.get("api/proxies", function (data) {
-                // Extract just the host IPs from the proxy objects
-                proxies = data.map(function (proxy) { return proxy.host; });
+            fetch("api/proxies")
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    // Extract just the host IPs from the proxy objects
+                    proxies = data.map(function (proxy) { return proxy.host; });
 
-                // Update any existing links now that proxies
-                // are loaded
-                $("a[data-ip]").each(function () {
-                    let ip = $(this).attr('data-ip');
-                    $(this).attr('href', wrapUrlWithProxy(ip, "/"));
+                    // Update any existing links now that proxies are loaded
+                    $("a[data-ip]").each(function () {
+                        let ip = $(this).attr('data-ip');
+                        $(this).attr('href', wrapUrlWithProxy(ip, "/"));
+                    });
+
+                    getFPPSystems();
+                    getLocalFpposFiles();
                 });
-
-                getFPPSystems();
-                getLocalFpposFiles();
-            });
-            $.get("api/git/branches", function (data) {
-
-                $.each(data, function (i, item) {
-                    $('#branchSelect').append($('<option>', {
-                        value: item,
-                        text: item
-                    }));
+            fetch("api/git/branches")
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    data.forEach(function (item) {
+                        $('#branchSelect').append($('<option>', { value: item, text: item }));
+                    });
                 });
-            });
 
             // Reload branch list when remote selection changes (dev UI mode)
             $('#branchRemoteSelect').on('change', function () {
