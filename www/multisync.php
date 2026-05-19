@@ -1801,7 +1801,7 @@
                     if (isFPP(data[i].typeId)) {
                         fppIpAddresses.push(ip);
                     } else if (isESPixelStick(data[i].typeId)) {
-                        if ((majorVersion == 3) || (majorVersion == 0)) {
+                        if ((majorVersion == 4) || (majorVersion == 0)) {
                             getESPixelStickBridgeStatus(ip);
                         } else {
                             fppIpAddresses.push(ip);
@@ -2542,7 +2542,7 @@
                 } else if (isESPixelStick(typeId)) {
                     var versionParts = version.split('.');
                     var majorVersion = parseInt(versionParts[0]);
-                    if (majorVersion >= 3) {
+                    if (majorVersion >= 4) {
                         getESPixelStickBridgeStatus(ip);
                     } else {
                         ips.push(ip);
