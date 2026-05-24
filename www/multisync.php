@@ -1289,8 +1289,6 @@
                             SetupToolTips();
                         }
                     });
-
-                });
             } finally {
                 if (Array.isArray(ipAddresses) && $('#MultiSyncRefreshStatus').is(":checked")) {
                     fppPoller.schedule(() => getFPPSystemStatus(ipAddresses, true));
