@@ -650,10 +650,9 @@
         function applyChannelIOIcons(ip, rowID) {
             var info = channelIOCheckedIPs[ip];
             if (!info || (!info.output && !info.input)) return;
-            var $modeCell = $('#' + rowID + '_mode');
-            if ($modeCell.length === 0) return;
-            // Don't add if icons already present
-            if ($modeCell.find('.channel-io-icons').length > 0) return;
+            var item = $('#fppSystemsTable').bootstrapTable('getRowByUniqueId', rowID);
+            if (!item) return;
+            if (item.mode && item.mode.indexOf('channel-io-icons') >= 0) return;
             var icons = '<span class="channel-io-icons">';
             if (info.input) {
                 icons += '<i class="fas fa-regular fa-circle-down channel-io-icon-input" data-ip="' + ip + '" aria-label="Channel Inputs Enabled (hover for details)"></i>';
@@ -662,7 +661,7 @@
                 icons += '<i class="fas fa-regular fa-circle-up channel-io-icon-output" data-ip="' + ip + '" aria-label="Channel Outputs Enabled (hover for details)"></i>';
             }
             icons += '</span>';
-            $modeCell.append(icons);
+            item.mode = (item.mode || '') + icons;
         }
 
         // ============================================================
@@ -1029,11 +1028,11 @@
 
                         rowID = hostRows[hostRowKey];
 
-                        var curStatus = $('#' + rowID + '_status').html();
-                        if ((curStatus != null) &&
-                            (curStatus != '') &&
-                            (curStatus.substr(0, 9) != "Last Seen") &&
-                            (!refreshing)) {
+                        var item = $('#fppSystemsTable').bootstrapTable('getRowByUniqueId', rowID);
+                        if (!item) return;
+
+                        var curStatus = item.status || '';
+                        if (curStatus !== '' && curStatus.indexOf('Last Seen') === -1 && !refreshing) {
                             // Don't replace an existing status via a different IP
                             return;
                         }
@@ -1041,17 +1040,19 @@
                             if (unavailables[ip] < 4) {
                                 return;
                             }
-                            $('#' + rowID + '_mode').html("<span class=\"warning-text\">Unreachable</span>");
+                            item.mode = "<span class=\"warning-text\">Unreachable</span>";
                         } else if (status != "") {
-                            $('#' + rowID + '_status').html(status);
-                            $('#' + rowID + '_mode').html(getFullMode(data, ip));
+                            item.status = status;
+                            item.mode = getFullMode(data, ip);
                             checkRemoteChannelIO(ip, rowID, data);
                         } else {
-                            $('#' + rowID + '_mode').html(getFullMode(data, ip));
+                            item.mode = getFullMode(data, ip);
                             checkRemoteChannelIO(ip, rowID, data);
                         }
+
+                        // Wifi path 1: interfaces-based (newer systems)
+                        var wifiIconHtml = '';
                         if (data.hasOwnProperty('wifi') && data.hasOwnProperty('interfaces')) {
-                            // Only show a wifi icon if the polled IP belongs to a wireless interface
                             var ipIface = null;
                             for (var i = 0; i < data.interfaces.length; i++) {
                                 var iface = data.interfaces[i];
@@ -1065,7 +1066,6 @@
                                 }
                                 if (ipIface) break;
                             }
-                            $('#' + rowID + "_ip").find(".wifi-icon").remove();
                             if (ipIface && ipIface.hasOwnProperty('wifi')) {
                                 var w = ipIface.wifi;
                                 var wifi_html = [];
@@ -1081,17 +1081,17 @@
                                 wifi_html.push('" class="wifi-icon wifi-');
                                 wifi_html.push(w.desc);
                                 wifi_html.push('"></span>');
-                                $(wifi_html.join('')).appendTo('td[data-ip="' + ip + '"]');
+                                wifiIconHtml = wifi_html.join('');
                             }
                         }
+                        item.ipaddress = (item._baseIpHtml || '') + wifiIconHtml;
 
-                        if ($('#' + rowID).attr('data-ip') != ip)
-                            $('#' + rowID).attr('data-ip', ip);
+                        if (item._dataIp !== ip) item._dataIp = ip;
 
-                        $('#' + rowID + '_elapsed').html(elapsed);
+                        item.elapsed = elapsed;
 
                         if (data.warnings != null && data.warnings.length > 0) {
-                            $('#' + rowID + '_warnings').removeAttr('style'); // Remove 'display: none' style
+                            $('#' + rowID + '_warnings').removeAttr('style');
 
                             // Ensure child rows match parent striping color
                             if ($('#' + rowID).hasClass('odd'))
@@ -1115,36 +1115,33 @@
 
                         //Expert View Rows
                         if (data.hasOwnProperty('advancedView') && data.status_name !== 'unknown' && data.status_name !== 'unreachable' && data.status_name !== 'password') {
-                            if (data.advancedView.hasOwnProperty('Platform')) {
-                                $('#' + rowID + '_platform').html(data.advancedView.Platform);
-                            }
+                            // Rebuild platform cell from advancedView data
                             // Prefer SubPlatform (verbose hardware model string, e.g.
                             // "Raspberry Pi Zero 2 W Rev 1.0") over Variant (short label,
                             // e.g. "PiZero 2") so the platform column keeps the detail
                             // shown by the initial multiSyncSystems render. See issue #2614.
+                            var platformTxt = item._platformInit || '';
+                            if (data.advancedView.hasOwnProperty('Platform')) {
+                                platformTxt = data.advancedView.Platform;
+                            }
+                            var variantTxt = item._variantInit || '';
                             if (data.advancedView.hasOwnProperty('SubPlatform') && (data.advancedView.SubPlatform != '')) {
-                                $('#' + rowID + '_variant').html(data.advancedView.SubPlatform);
+                                variantTxt = data.advancedView.SubPlatform;
                             } else if (data.advancedView.hasOwnProperty('Variant') && (data.advancedView.Variant != '')) {
-                                $('#' + rowID + '_variant').html(data.advancedView.Variant);
+                                variantTxt = data.advancedView.Variant;
                             }
+                            item.platform = "<span id='" + rowID + "_platform'>" + platformTxt + "</span>" +
+                                "<br><small id='" + rowID + "_variant'>" + variantTxt + "</small>" +
+                                "<span class='hidden typeId'> " + item._typeIdHex + " </span>" +
+                                "<span class='hidden version'>" + item._versionStr + "</span>";
 
-                            var updatesAvailable = 0;
-                            if ((typeof (data.advancedView.RemoteGitVersion) !== 'undefined') &&
-                                (typeof (data.advancedView.LocalGitVersion) !== 'undefined') &&
-                                (data.advancedView.RemoteGitVersion !== "Unknown") &&
-                                (data.advancedView.RemoteGitVersion !== "") &&
-                                (data.advancedView.RemoteGitVersion !== data.advancedView.LocalGitVersion)) {
-                                updatesAvailable = 1;
-                            }
                             if (data.advancedView.hasOwnProperty("backgroundColor") && data.advancedView.backgroundColor != "") {
-                                $('#' + rowID).css('background', "#" + data.advancedView.backgroundColor);
-                                $('#' + rowID + "_warnings").css('background', "#" + data.advancedView.backgroundColor);
-                                $('#' + rowID).css('color', "#FFF");
-                                $('#' + rowID + " a").css('color', "#989898");
-                                $('#' + rowID + "_warnings .warning-text").css('color', "#FF8080");
-                                setBTColorData(rowID, data.advancedView.backgroundColor);
+                                var colorInt = parseInt(data.advancedView.backgroundColor, 16);
+                                item.fppcolor = isNaN(colorInt) ? '' : colorInt;
+                                item._style = isNaN(colorInt) ? '' : 'background: #' + data.advancedView.backgroundColor + '; color: #FFF;';
                             } else {
-                                setBTColorData(rowID, '');
+                                item.fppcolor = '';
+                                item._style = '';
                             }
                             if (data.advancedView.hasOwnProperty("RemoteGitVersion")) {
                                 var u = "<table class='multiSyncVerboseTable'>";
@@ -1160,18 +1157,23 @@
                                     u += "<span style='display: none;' id='" + rowID + "_origin'></span>";
                                 }
                                 u += "</table>";
-                                $('#advancedViewGitVersions_' + rowID).html(u);
+                                item.gitversions = u;
                             }
-
 
                             if (data.advancedView.OSVersion !== "") {
-                                $('#' + rowID + '_osversionRow').show();
-                                $('#' + rowID + '_osversion').html(data.advancedView.OSVersion);
+                                item.version = "<table class='multiSyncVerboseTable'>" +
+                                    "<tr><td>FPP:</td><td>" + item._versionStr + "</td></tr>" +
+                                    "<tr><td>OS:</td><td>" + data.advancedView.OSVersion + "</td></tr>" +
+                                    "</table>";
                             }
+
                             if (data.advancedView.HostDescription !== "") {
-                                var origDesc = $('#' + rowID).find('.hostDescriptionSM').html();
-                                if (origDesc == '')
-                                    $('#' + rowID).find('.hostDescriptionSM').html(data.advancedView.HostDescription);
+                                if (item.hostname.indexOf("class='hostDescriptionSM'></small>") >= 0) {
+                                    item.hostname = item.hostname.replace(
+                                        "class='hostDescriptionSM'></small>",
+                                        "class='hostDescriptionSM'>" + data.advancedView.HostDescription + "</small>"
+                                    );
+                                }
                             }
 
                             var u = "<table class='multiSyncVerboseTable'>";
@@ -1190,7 +1192,7 @@
                                         diskHtml += type + ": " + used + "/" + total;
                                     }
                                 } catch (error) {
-                                    // This feature may not exists on older devices
+                                    // This feature may not exist on older devices
                                 }
 
                                 if (diskHtml == "") {
@@ -1208,8 +1210,7 @@
                                     u += "<tr><td>Mem:&nbsp;</td><td>" + Math.round(fr) + "K Free</td></tr>";
                                 }
                                 if (data.advancedView.hasOwnProperty("rssi")) {
-                                    // Only show wifi icon if the polled IP belongs to a wireless interface.
-                                    // For legacy systems without interfaces data, assume wifi (old behaviour).
+                                    // Wifi path 2: legacy rssi field (older systems without interfaces data)
                                     var isWifiIp = true;
                                     if (data.hasOwnProperty('interfaces') && data.interfaces.length > 0) {
                                         isWifiIp = false;
@@ -1225,7 +1226,7 @@
                                             }
                                         }
                                     }
-                                    if (isWifiIp) {
+                                    if (isWifiIp && wifiIconHtml === '') {
                                         var rssi = +data.advancedView.rssi;
                                         var quality = 2 * (rssi + 100);
 
@@ -1249,13 +1250,9 @@
                                         wifi_html.push(desc);
                                         wifi_html.push('"></span>');
 
-                                        if (wifi_html.length > 0) {
-                                            $('#' + rowID + "_ip").find(".wifi-icon").remove();
-                                            $(wifi_html.join('')).appendTo('td[data-ip="' + ip + '"]');
-                                        }
+                                        wifiIconHtml = wifi_html.join('');
+                                        item.ipaddress = (item._baseIpHtml || '') + wifiIconHtml;
                                     }
-
-                                    //u += "<tr><td>RSSI:</td><td>" + rssi + "dBm / " + quality + "%</td></tr>";
                                 }
 
                                 if (data.advancedView.Utilization.hasOwnProperty("Uptime")) {
@@ -1282,11 +1279,12 @@
                                 }
                             }
                             u += "</table>";
-
-                            $('#advancedViewUtilization_'             + rowID).html(u);
-                            SetupToolTips();
+                            item.utilization = u;
                         }
                     });
+            var statusBt = $('#fppSystemsTable').data('bootstrap.table');
+            if (statusBt) statusBt.initBody();
+            SetupToolTips();
             } finally {
                 if (Array.isArray(ipAddresses) && $('#MultiSyncRefreshStatus').is(":checked")) {
                     fppPoller.schedule(() => getFPPSystemStatus(ipAddresses, true));
@@ -1310,6 +1308,7 @@
 
             $('#fppSystems').empty();
             rowSpans = [];
+            var systemsData = [];
 
             var uniqueHosts = new Object();
 
@@ -1407,12 +1406,18 @@
                     hostRows[hostRowKey] = rowID;
                     ipRows[data[i].address] = rowID;
 
-                    $('#' + rowID + '_ip').append('<br>' + ipLink(data[i].address));
-
-                    $('#' + rowID).attr('data-iplist', $('#' + rowID).attr('data-iplist') + ',' + data[i].address);
-
-                    if (data[i].fppModeString == 'remote') {
-                        $('#' + rowID + '_ip').append(star);
+                    // Update the existing data item — no DOM row exists yet
+                    for (var si = 0; si < systemsData.length; si++) {
+                        if (systemsData[si]._id === rowID) {
+                            var extra = '<br>' + ipLink(data[i].address);
+                            if (data[i].fppModeString == 'remote') {
+                                extra += star;
+                            }
+                            systemsData[si].ipaddress += extra;
+                            systemsData[si]._baseIpHtml += extra;
+                            systemsData[si]._dataIplist += ',' + data[i].address;
+                            break;
+                        }
                     }
 
                     if (isFPP(data[i].typeId)) {
@@ -1446,66 +1451,90 @@
                         ? hostname
                         : "<a target='host_" + data[i].address + "' href='" + wrapUrlWithProxy(data[i].address, "/") + "'>" + hostname + "</a>";
 
-
-                    var newRow = "<tr id='" + rowID + "' data-ip='" + data[i].address + "' data-iplist='" + data[i].address + "' class='systemRow'>" +
-                        "<td class='hostnameColumn'><span class='reorder-grip'><i class='rowGripIcon fpp-icon-grip'></i></span><span id='fpp_" + ip.replace(/\./g, '_') + "_hostname'" + hnSpanStyle + ">" + hostTxt + "</span><br><small class='hostDescriptionSM' id='fpp_" + ip.replace(/\./g, '_') + "_desc'>" + hostDescription + "</small></td>" +
-                        "<td id='" + rowID + "_ip' data-ip='" + data[i].address + "'>" + ipTxt + "</td>" +
-                        "<td><span id='" + rowID + "_platform'>" + data[i].type + "</span><br><small id='" + rowID + "_variant'>" + data[i].model + "</small><span class='hidden typeId'> 0x" + parseInt(data[i].typeId).toString(16) + " </span>"
-                        + "<span class='hidden version'>" + data[i].version + "</span></td>" +
-                        "<td id='" + rowID + "_mode'>" + fppMode + "</td>" +
-                        "<td id='" + rowID + "_status'>Last Seen:<br>" + data[i].lastSeenStr + "</td>" +
-                        "<td id='" + rowID + "_elapsed'></td>";
-
                     var versionParts = data[i].version.split('.');
                     var majorVersion = 0;
                     if (data[i].version != 'Unknown')
                         majorVersion = parseInt(versionParts[0]);
 
-                    if ((isFPP(data[i].typeId))) {
-                        var versionStr = data[i].version.replace('.x-master', '.x').replace(/-g[A-Za-z0-9]*/, '');
+                    var versionStr = data[i].version;
+                    var versionHtml;
+                    if (isFPP(data[i].typeId)) {
+                        versionStr = data[i].version.replace('.x-master', '.x').replace(/-g[A-Za-z0-9]*/, '');
                         if (versionStr.endsWith('-dirty')) {
                             versionStr = versionStr.replace('-dirty', '');
-                            var link = "<br><a ";
+                            var dirtyLink = "<br><a ";
                             if (data[i].local) {
-                                link += "href='settings.php#settings-developer'";
+                                dirtyLink += "href='settings.php#settings-developer'";
                             } else {
-                                link += "target='host_" + data[i].address + "' href='" + wrapUrlWithProxy(data[i].address, '/settings.php#settings-developer') + "'";
+                                dirtyLink += "target='host_" + data[i].address + "' href='" + wrapUrlWithProxy(data[i].address, '/settings.php#settings-developer') + "'";
                             }
-                            link += ">Modified</a>";
-                            versionStr += link;
+                            dirtyLink += ">Modified</a>";
+                            versionStr += dirtyLink;
                         }
-                        newRow += "<td><table class='multiSyncVerboseTable'><tr><td>FPP:</td><td id='" + rowID + "_version'>" + versionStr + "</td></tr><tr><td>OS:</td><td id='" + rowID + "_osversion'></td></tr></table></td>";
+                        versionHtml = "<table class='multiSyncVerboseTable'>" +
+                            "<tr><td>FPP:</td><td>" + versionStr + "</td></tr>" +
+                            "<tr><td>OS:</td><td></td></tr>" +
+                            "</table>";
                     } else {
-                        newRow += "<td id='" + rowID + "_version'>" + data[i].version + "</td>";
+                        versionHtml = data[i].version;
                     }
 
+                    var selectboxHtml = '';
+                    if (isFPP(data[i].typeId) && majorVersion >= 4) {
+                        selectboxHtml = "<input type='checkbox' class='remoteCheckbox largeCheckbox multisyncRowCheckbox' name='" + data[i].address + "'>";
+                    }
 
-                    newRow +=
-                        "<td id='advancedViewGitVersions_" + rowID + "'></td>" +
-                        "<td id='advancedViewUtilization_" + rowID + "'></td>";
+                    var ipDash = ip.replace(/\./g, '_');
+                    var typeIdHex = '0x' + parseInt(data[i].typeId).toString(16);
 
-                    newRow += "<td class='centerCenter'>";
-                    if ((isFPP(data[i].typeId)) &&
-                        (majorVersion >= 4))
-                        newRow += "<input type='checkbox' class='remoteCheckbox largeCheckbox multisyncRowCheckbox' name='" + data[i].address + "'>";
-
-                    newRow += "</td>";
-
-
-                    newRow = newRow + "</tr>";
-                    $('#fppSystems').append(newRow);
+                    systemsData.push({
+                        _id:           rowID,
+                        _dataIp:       data[i].address,
+                        _dataIplist:   data[i].address,
+                        _isFPP:        isFPP(data[i].typeId),
+                        _typeIdHex:    typeIdHex,
+                        _platformInit: data[i].type,
+                        _variantInit:  data[i].model,
+                        _versionStr:   versionStr,
+                        _baseIpHtml:   ipTxt,
+                        hostname:     "<span class='reorder-grip'><i class='rowGripIcon fpp-icon-grip'></i></span>" +
+                                      "<span id='fpp_" + ipDash + "_hostname'" + hnSpanStyle + ">" + hostTxt + "</span>" +
+                                      "<br><small class='hostDescriptionSM'></small>",
+                        ipaddress:    ipTxt,
+                        platform:     "<span id='" + rowID + "_platform'>" + data[i].type + "</span>" +
+                                      "<br><small id='" + rowID + "_variant'>" + data[i].model + "</small>" +
+                                      "<span class='hidden typeId'> " + typeIdHex + " </span>" +
+                                      "<span class='hidden version'>" + data[i].version + "</span>",
+                        mode:         fppMode,
+                        status:       'Last Seen:<br>' + data[i].lastSeenStr,
+                        elapsed:      '',
+                        version:      versionHtml,
+                        gitversions:  '',
+                        utilization:  '',
+                        fppcolor:     '',
+                        selectbox:    selectboxHtml
+                    });
 
                     // For older FPP systems without channelOutputsEnabled, check remote config
                     if (isFPP(data[i].typeId)) {
                         checkRemoteChannelIO(data[i].address, rowID, data[i]);
                     }
 
-                    var colspan = 11;
-                    newRow = "<tr id='" + rowID + "_warnings' class='child-row warning-row'><td colspan='" + colspan + "' id='" + rowID + "_warningCell'></td></tr>";
-                    $('#fppSystems').append(newRow);
-
-                    newRow = "<tr id='" + rowID + "_logs' style='display:none' class='logRow child-row'><td colspan='" + colspan + "' id='" + rowID + "_logCell'><table class='multiSyncVerboseTable' width='100%'><tr><td>Log:</td><td width='100%'><textarea id='" + rowID + "_logText' style='width: 100%;' rows='8' disabled></textarea></td></tr><tr><td></td><td><div class='right' id='" + rowID + "_doneButtons' style='display: none;'><input type='button' class='buttons' value='Restart FPPD' onClick='restartSystem(\"" + rowID + "\");' style='float: left;'><input type='button' class='buttons' value='Reboot' onClick='rebootRemoteFPP(\"" + rowID + "\", \"" + ip + "\");' style='float: left;'><input type='button' class='buttons' value='Close Log' onClick='$(\"#" + rowID + "_logs\").hide(); rowSpanSet(\"" + rowID + "\");'></div></td></tr></table></td></tr>";
-                    $('#fppSystems').append(newRow);
+                    $('#fppSystems').append(
+                        "<tr id='" + rowID + "_warnings' class='child-row warning-row'>" +
+                        "<td colspan='10' id='" + rowID + "_warningCell'></td></tr>"
+                    );
+                    $('#fppSystems').append(
+                        "<tr id='" + rowID + "_logs' style='display:none' class='logRow child-row'>" +
+                        "<td colspan='10' id='" + rowID + "_logCell'>" +
+                        "<table class='multiSyncVerboseTable' width='100%'>" +
+                        "<tr><td>Log:</td><td width='100%'><textarea id='" + rowID + "_logText' style='width: 100%;' rows='8' disabled></textarea></td></tr>" +
+                        "<tr><td></td><td><div class='right' id='" + rowID + "_doneButtons' style='display: none;'>" +
+                        "<input type='button' class='buttons' value='Restart FPPD' onClick='restartSystem(\"" + rowID + "\");' style='float: left;'>" +
+                        "<input type='button' class='buttons' value='Reboot' onClick='rebootRemoteFPP(\"" + rowID + "\", \"" + ip + "\");' style='float: left;'>" +
+                        "<input type='button' class='buttons' value='Close Log' onClick='$(\"#" + rowID + "_logs\").hide(); rowSpanSet(\"" + rowID + "\");'>" +
+                        "</div></td></tr></table></td></tr>"
+                    );
 
                     if (isFPP(data[i].typeId)) {
                         fppIpAddresses.push(ip);
@@ -1559,15 +1588,17 @@
                 SetSetting("MultiSyncExtraRemotes", extras, 0, 0);
             }
 
-            // Initialize Bootstrap Table now that DOM rows are populated
+            // Initialize Bootstrap Table with empty data so its first
+            // initBody is a no-op, then load through the monkey-patch.
             var $tbl = $('#fppSystemsTable');
 
-            // Detach child rows (warnings/logs) before BT init so they
-            // don't enter BT's data model — they have a single colspan
-            // cell that doesn't map to BT's column structure.
+            // Detach child rows before BT init — they aren't BT data rows.
             var $detachedChildren = $('#fppSystems > tr.child-row').detach();
 
             $tbl.bootstrapTable({
+                idField: '_id',
+                uniqueId: '_id',
+                data: [],
                 filterControl: true,
                 filterControlVisible: true,
                 sortName: (savedDisplayOrder && savedDisplayOrder.length > 0) ? undefined : 'hostname',
@@ -1575,6 +1606,12 @@
                 showColumns: false,
                 striped: true,
                 undefinedText: '',
+                rowAttributes: function (row) {
+                    var attrs = { id: row._id, class: 'systemRow' };
+                    if (row._dataIp) attrs['data-ip'] = row._dataIp;
+                    if (row._dataIplist) attrs['data-iplist'] = row._dataIplist;
+                    return attrs;
+                },
                 rowStyle: function (row) {
                     if (row && row.fppcolor !== '' && row.fppcolor !== null && row.fppcolor !== undefined) {
                         var colorNum = parseInt(row.fppcolor, 10);
@@ -1595,95 +1632,28 @@
                 }
             });
 
-            // Re-attach child rows after their parent system rows
-            reattachChildRows($tbl, $detachedChildren);
-
-            // Monkey-patch the BT instance so sort / filter / column
-            // toggle operations don't mangle child rows.
+            // Monkey-patch initBody to preserve child rows across re-renders.
             var bt = $tbl.data('bootstrap.table');
             if (bt) {
                 var origInitBody = bt.initBody;
                 bt.initBody = function (fixedScroll, updatedUid) {
                     var $body = this.$el.find('>tbody');
-                    // Detach child rows before BT re-renders tbody
                     var $childRows = $body.length
                         ? $body.find('>tr.child-row').detach() : $();
-
-                    // Sync any async DOM cell updates back into BT's
-                    // data model so they survive the upcoming render.
-                    syncDOMToModel(this);
-
-                    // Original render (replaces tbody content)
                     origInitBody.call(this, fixedScroll, updatedUid);
-
-                    // Put child rows back in the correct position
                     if ($childRows.length) {
                         reattachChildRows($tbl, $childRows);
                     }
                 };
             }
 
+            // Load data through the monkey-patch so rowStyle and rowAttributes apply.
+            $tbl.bootstrapTable('load', systemsData);
+
+            // Re-attach child rows after their parent system rows.
+            reattachChildRows($tbl, $detachedChildren);
+
             if (typeof buildColumnSelector === 'function') buildColumnSelector();
-        }
-
-        /**
-         * Sync current DOM cell contents back into BT's data model so
-         * async status updates (written directly to DOM) survive the
-         * next sort / filter / column-toggle re-render.
-         *
-         * Uses getVisibleFields() to correctly map TD positions to
-         * field names regardless of which columns are hidden.
-         *
-         * IMPORTANT: skips sync when the number of TDs in a row does
-         * not match the expected visible-field count.  This happens
-         * during column-toggle operations where initHeader already
-         * changed the visibility but initBody hasn't re-rendered yet.
-         */
-        function syncDOMToModel(bt) {
-            if (!bt || !bt.options.data || !bt.options.data.length) return;
-            var $tbody = bt.$el.find('>tbody');
-            if (!$tbody.length) return;
-
-            var visibleFields = bt.getVisibleFields();
-            if (!visibleFields.length) return;
-
-            var expectedTds = visibleFields.length;
-
-            for (var d = 0; d < bt.options.data.length; d++) {
-                var item = bt.options.data[d];
-                if (!item._id) continue;
-                var tr = $tbody[0].querySelector('#' + CSS.escape(item._id));
-                if (!tr) continue;
-                var tds = tr.querySelectorAll(':scope > td');
-
-                // If TD count doesn't match visible fields the DOM was
-                // rendered with a different column set — skip this row
-                // to avoid mapping cells to the wrong fields.
-                if (tds.length !== expectedTds) continue;
-
-                // Sync TR-level data-* attributes (e.g. data-ip updates)
-                var ds = tr.dataset;
-                var newData = {};
-                for (var key in ds) {
-                    if (key !== 'index' && key !== 'uniqueid' && key !== 'hasDetailView') {
-                        newData[key] = ds[key];
-                    }
-                }
-                item._data = newData;
-
-                for (var i = 0; i < visibleFields.length; i++) {
-                    var td = tds[i];
-                    if (!td) break;
-                    var field = visibleFields[i];
-                    item[field] = td.innerHTML.trim();
-                    // Preserve cell-level id, class, data-* and style
-                    if (td.id) item['_' + field + '_id'] = td.id;
-                    var cls = td.getAttribute('class');
-                    if (cls) item['_' + field + '_class'] = cls;
-                    var stl = td.getAttribute('style');
-                    if (stl) item['_' + field + '_style'] = stl;
-                }
-            }
         }
 
         /**
@@ -1713,35 +1683,6 @@
                     $after.after(this);
                 }
             });
-        }
-
-        function findBTItemByRowId(rowID) {
-            var bt = $('#fppSystemsTable').data('bootstrap.table');
-            if (!bt || !bt.options || !Array.isArray(bt.options.data)) return null;
-
-            for (var i = 0; i < bt.options.data.length; i++) {
-                if (bt.options.data[i] && bt.options.data[i]._id === rowID) {
-                    return bt.options.data[i];
-                }
-            }
-
-            return null;
-        }
-
-        function setBTColorData(rowID, colorHex) {
-            var item = findBTItemByRowId(rowID);
-            if (!item) return;
-
-            if (colorHex && colorHex !== '') {
-                var colorInt = parseInt(colorHex, 16);
-                if (!isNaN(colorInt)) {
-                    item.fppcolor = colorInt;
-                }
-                item._style = 'background: #' + colorHex + '; color: #FFF;';
-            } else {
-                item.fppcolor = '';
-                delete item._style;
-            }
         }
 
         var systemsList = [];
