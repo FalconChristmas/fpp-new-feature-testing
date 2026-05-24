@@ -1102,7 +1102,7 @@
                                 wifiIconHtml = wifi_html.join('');
                             }
                         }
-                        item.ipaddress = (item._baseIpHtml || '') + wifiIconHtml;
+                        item.ipaddress = (item._baseIpHtml || '') + wifiIconHtml + (item._extraIpHtml || '');
 
                         if (item._dataIp !== ip) item._dataIp = ip;
 
@@ -1269,7 +1269,7 @@
                                         wifi_html.push('"></span>');
 
                                         wifiIconHtml = wifi_html.join('');
-                                        item.ipaddress = (item._baseIpHtml || '') + wifiIconHtml;
+                                        item.ipaddress = (item._baseIpHtml || '') + wifiIconHtml + (item._extraIpHtml || '');
                                     }
                                 }
 
@@ -1298,6 +1298,29 @@
                             }
                             u += "</table>";
                             item.utilization = u;
+
+                            // Add any IPs the device reports in advancedView but that
+                            // multiSyncSystems didn't include (e.g. a secondary subnet NIC).
+                            // Extra IPs go into _extraIpHtml so the wifi icon stays between
+                            // the primary IPs and the secondary ones.
+                            if (data.advancedView.hasOwnProperty('IPs') &&
+                                    Array.isArray(data.advancedView.IPs)) {
+                                var changed = false;
+                                var extra = item._extraIpHtml || '';
+                                data.advancedView.IPs.forEach(function(avIp) {
+                                    // Skip link-local (169.254.x.x) — APIPA addresses have no DHCP lease
+                                    if (avIp.indexOf('169.254.') === 0) return;
+                                    if ((item._baseIpHtml || '').indexOf(avIp) === -1 &&
+                                            extra.indexOf(avIp) === -1) {
+                                        extra += '<br>' + ipLink(avIp);
+                                        changed = true;
+                                    }
+                                });
+                                if (changed) {
+                                    item._extraIpHtml = extra;
+                                    item.ipaddress = (item._baseIpHtml || '') + wifiIconHtml + extra;
+                                }
+                            }
                         }
                     });
             var statusBt = $('#fppSystemsTable').data('bootstrap.table');
@@ -1399,8 +1422,11 @@
                     var cleanHost = hostname.replace(/[^a-zA-Z0-9]/, '_');
                     rowID = rowID + '_' + cleanHost;
                 }
-                var hostKey = hostname + '_' + data[i].version + '_' + data[i].fppModeString + '_' + data[i].channelRanges;
-                hostKey = hostKey.replace(/[^a-zA-Z0-9]/, '_');
+                // UUID is the authoritative dedup key; two IPs for the same device
+                // can report subtly different version strings and would create separate rows.
+                var hostKey = (data[i].uuid && data[i].uuid !== '')
+                    ? data[i].uuid
+                    : (hostname + '_' + data[i].fppModeString + '_' + data[i].channelRanges).replace(/[^a-zA-Z0-9]/, '_');
 
                 hostRows[hostRowKey] = rowID;
 
@@ -1438,9 +1464,8 @@
                         }
                     }
 
-                    if (isFPP(data[i].typeId)) {
-                        fppIpAddresses.push(ip);
-                    }
+                    // Do NOT add the duplicate IP to the poll list — the primary IP
+                    // already covers this device; two polls would race and overwrite each other.
                 } else {
                     uniqueHosts[hostKey] = rowID;
                     ipRows[data[i].address] = rowID;
