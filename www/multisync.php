@@ -1142,8 +1142,6 @@
                                 $('#' + rowID).css('color', "#FFF");
                                 $('#' + rowID + " a").css('color', "#989898");
                                 $('#' + rowID + "_warnings .warning-text").css('color', "#FF8080");
-                                var colorInt = parseInt(data.advancedView.backgroundColor, 16);
-                                $('#advancedViewFPPColor_' + rowID).html(colorInt);
                                 setBTColorData(rowID, data.advancedView.backgroundColor);
                             } else {
                                 setBTColorData(rowID, '');
@@ -1484,8 +1482,7 @@
 
                     newRow +=
                         "<td id='advancedViewGitVersions_" + rowID + "'></td>" +
-                        "<td id='advancedViewUtilization_" + rowID + "'></td>" +
-                        "<td id='advancedViewFPPColor_" + rowID + "'></td>";
+                        "<td id='advancedViewUtilization_" + rowID + "'></td>";
 
                     newRow += "<td class='centerCenter'>";
                     if ((isFPP(data[i].typeId)) &&
@@ -3378,9 +3375,6 @@
                                             Version</th>
                                         <th data-field="gitversions" data-sortable="false">Git Versions</th>
                                         <th data-field="utilization" data-sortable="false">Utilization</th>
-                                        <th data-field="fppcolor" data-sortable="true" data-sorter="fppColorSorter"
-                                            data-visible="false">
-                                            FPPColor</th>
                                         <th data-field="selectbox" data-sortable="false" data-filter-control="false"
                                             data-switchable="false">
                                             <input id='selectAllCheckbox' type='checkbox'
@@ -3775,7 +3769,7 @@
                 // Individual column checkboxes
                 var columns = $tbl.bootstrapTable('getVisibleColumns').concat($tbl.bootstrapTable('getHiddenColumns'));
                 columns.forEach(function (col) {
-                    if (col.field === 'hostname' || col.field === 'selectbox' || col.field === 'fppcolor') return;
+                    if (col.field === 'hostname' || col.field === 'selectbox') return;
                     var isVisible = $tbl.bootstrapTable('getVisibleColumns').some(function (c) { return c.field === col.field; });
                     var label = $('<label></label>');
                     var checkbox = $('<input type="checkbox">').prop('checked', isVisible).data('field', col.field);
