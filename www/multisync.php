@@ -773,6 +773,21 @@
          * Re-applies the saved display order by re-parsing the systems list.
          * Useful when user has sorted by a column and wants to return to saved order.
          */
+        function sortSystemsByColor() {
+            var bt = $('#fppSystemsTable').data('bootstrap.table');
+            if (!bt) return;
+            bt.options.data.sort(function (a, b) {
+                var ac = (a.fppcolor !== '' && a.fppcolor !== null && a.fppcolor !== undefined) ? parseInt(a.fppcolor, 10) : -1;
+                var bc = (b.fppcolor !== '' && b.fppcolor !== null && b.fppcolor !== undefined) ? parseInt(b.fppcolor, 10) : -1;
+                if (ac < 0 && bc < 0) return 0;
+                if (ac < 0) return 1;
+                if (bc < 0) return -1;
+                return ac - bc;
+            });
+            bt.data = bt.options.data.slice();
+            bt.initBody();
+        }
+
         function sortBySavedOrder() {
             if (!savedDisplayOrder || savedDisplayOrder.length === 0) {
                 $.jGrowl('No saved display order.', { themeState: 'detract' });
@@ -3267,7 +3282,7 @@
                     <!-- Sort by Color Btn  -->
                     <button id="sortbyColorBtn" type="button" class="buttons btn btn-secondary"
                         data-bs-placement="bottom" data-bs-title="Sort Systems by Color"
-                        onclick="$('#fppSystemsTable').bootstrapTable('sortBy', {field: 'fppcolor', sortOrder: 'asc'});">
+                        onclick="sortSystemsByColor();">
                         Sort Systems by Color
                     </button>
 
