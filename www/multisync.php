@@ -1066,31 +1066,26 @@
                         }
 
                         // Wifi path 1: interfaces-based (newer systems).
-                        // Scan all interfaces: find the one matching the polled IP (ipIface)
-                        // and the first wifi interface with active signal (anyWifiIface).
-                        // Devices polled via their wired IP may still have wifi on another NIC.
+                        // Only show icon when the polled IP itself is on a wifi interface
+                        // with an active link — a dual-homed device polled via eth0 gets no icon.
                         var wifiIconHtml = '';
                         if (data.hasOwnProperty('wifi') && data.hasOwnProperty('interfaces')) {
                             var ipIface = null;
-                            var anyWifiIface = null;
                             for (var i = 0; i < data.interfaces.length; i++) {
                                 var iface = data.interfaces[i];
                                 if (iface.addr_info) {
                                     for (var j = 0; j < iface.addr_info.length; j++) {
                                         if (iface.addr_info[j].local === ip) {
                                             ipIface = iface;
+                                            break;
                                         }
                                     }
                                 }
-                                if (iface.hasOwnProperty('wifi') && !anyWifiIface &&
-                                        (iface.wifi.link || 0) > 0) {
-                                    anyWifiIface = iface;
-                                }
+                                if (ipIface) break;
                             }
-                            var wifiSource = (ipIface && ipIface.hasOwnProperty('wifi'))
-                                ? ipIface : anyWifiIface;
-                            if (wifiSource) {
-                                var w = wifiSource.wifi;
+                            if (ipIface && ipIface.hasOwnProperty('wifi') &&
+                                    (ipIface.wifi.link || 0) > 0) {
+                                var w = ipIface.wifi;
                                 var wifi_html = [];
                                 wifi_html.push('<span title="');
                                 if (w.pct) {
