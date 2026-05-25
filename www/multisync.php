@@ -1836,10 +1836,12 @@
             else if (rssi >= -50)
                 quality = 100;
 
+            var wifiDesc = quality < 25 ? 'weak' : quality < 50 ? 'fair' : quality < 75 ? 'good' : 'excellent';
+            var wifiIcon = '<span title="' + quality + '% ' + rssi + 'dBm" class="wifi-icon wifi-' + wifiDesc + '"></span>';
+
             var uf = formatUptime(+s.system.uptime / 1000);
 
             var u = "<table class='multiSyncVerboseTable'>";
-            u += "<tr><td>RSSI:</td><td>" + rssi + "dBm / " + quality + "%</td></tr>";
             u += '<tr><td>UP:</td><td><span title="since ' + uf.since + '">' + uf.short + '</span></td></tr>';
             u += "</table>";
 
@@ -1849,6 +1851,15 @@
             if (!item) return;
 
             item.utilization = u;
+
+            var endTag = ip + '</a>';
+            var base = item._baseIpHtml || '';
+            var extra = item._extraIpHtml || '';
+            if (base.indexOf(endTag) !== -1) {
+                item.ipaddress = base.replace(endTag, endTag + wifiIcon) + extra;
+            } else {
+                item.ipaddress = base + wifiIcon + extra;
+            }
 
             if (item.mode === 'Bridge') {
                 var st = 'Bridging';
@@ -2030,12 +2041,12 @@
                         var uf = formatUptime(parseInt(s.P.U));
 
                         var u = "<table class='multiSyncVerboseTable'>";
-                        u += '<tr><td>UP:</td><td><span title="since ' + uf.since + '">' + uf.short + '</span></td></tr>';
-                        u += "<tr><td>V1 Voltage:</td><td> " + v1voltage + "v</td></tr>";
+                        u += '<tr><td><small class='text-muted'>UP:</small>/td><td><span title="since ' + uf.since + '">' + uf.short + '</span></td></tr>';
+                        u += "<tr><td><small class='text-muted'>V1:</small></td><td> " + v1voltage + "v</td></tr>";
                         if (s.P.BR != 48) {
-                            u += "<tr><td>V2 Voltage:</td><td> " + v2voltage + "v</td></tr>";
+                            u += "<tr><td><small class='text-muted'>V2:</small></td><td> " + v2voltage + "v</td></tr>";
                         }
-                        u += "<tr><td>Temp:</td><td> " + t1tempLabel + "</td></tr>";
+                        u += "<tr><td><small class='text-muted'>TEMP:</small></td><td> " + t1tempLabel + "</td></tr>";
                         u += "</table>";
 
                         var rowId = hostRows[ip.replace(/\./g, '_')];
@@ -2101,7 +2112,7 @@
                     var uf = formatUptime(parseInt(data.uptime));
 
                     var u = "<table class='multiSyncVerboseTable'>";
-                    u += '<tr><td>UP:</td><td><span title="since ' + uf.since + '">' + uf.short + '</span></td></tr>';
+                    u += '<tr><td><small class='text-muted'>UP:</small></td><td><span title="since ' + uf.since + '">' + uf.short + '</span></td></tr>';
                     u += "</table>";
 
                     var rowId = hostRows[ip.replace(/\./g, '_')];
@@ -2157,7 +2168,7 @@
                     var uf = formatUptime(data.system.uptime_seconds);
 
                     var u = "<table class='multiSyncVerboseTable'>";
-                    u += '<tr><td>UP:</td><td><span title="since ' + uf.since + '">' + uf.short + '</span></td></tr>';
+                    u += '<tr><td><small class='text-muted'>UP:</small></td><td><span title="since ' + uf.since + '">' + uf.short + '</span></td></tr>';
                     u += "</table>";
 
                     var rowId = hostRows[ip.replace(/\./g, '_')];
@@ -2210,7 +2221,7 @@
                     var uf = formatUptime(data.uptime);
 
                     var u = "<table class='multiSyncVerboseTable'>";
-                    u += '<tr><td>UP:</td><td><span title="since ' + uf.since + '">' + uf.short + '</span></td></tr>';
+                    u += '<tr><td><small class='text-muted'>UP:</small></td><td><span title="since ' + uf.since + '">' + uf.short + '</span></td></tr>';
                     u += "</table>";
 
                     var rowId = hostRows[ip.replace(/\./g, '_')];
