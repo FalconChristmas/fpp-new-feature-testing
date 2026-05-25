@@ -2095,11 +2095,12 @@
                     }
                     var rssi = data.wifi.rssi;
                     var quality = data.wifi.signal;
+                    var wifiDesc = quality < 25 ? 'weak' : quality < 50 ? 'fair' : quality < 75 ? 'good' : 'excellent';
+                    var wifiIcon = '<span title="' + quality + '% ' + rssi + 'dBm" class="wifi-icon wifi-' + wifiDesc + '"></span>';
 
                     var uf = formatUptime(parseInt(data.uptime));
 
                     var u = "<table class='multiSyncVerboseTable'>";
-                    u += "<tr><td>RSSI:</td><td>" + rssi + "dBm / " + quality + "%</td></tr>";
                     u += '<tr><td>UP:</td><td><span title="since ' + uf.since + '">' + uf.short + '</span></td></tr>';
                     u += "</table>";
 
@@ -2108,6 +2109,15 @@
                     if (!item) return;
                     item.utilization = u;
                     item.status = data.status_name;
+
+                    var endTag = ip + '</a>';
+                    var base = item._baseIpHtml || '';
+                    var extra = item._extraIpHtml || '';
+                    if (base.indexOf(endTag) !== -1) {
+                        item.ipaddress = base.replace(endTag, endTag + wifiIcon) + extra;
+                    } else {
+                        item.ipaddress = base + wifiIcon + extra;
+                    }
                 });
                 var bt = $tbl.data('bootstrap.table');
                 if (bt) bt.initBody();
