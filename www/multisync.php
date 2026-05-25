@@ -2041,7 +2041,7 @@
                         var uf = formatUptime(parseInt(s.P.U));
 
                         var u = "<table class='multiSyncVerboseTable'>";
-                        u += '<tr><td><small class='text-muted'>UP:</small>/td><td><span title="since ' + uf.since + '">' + uf.short + '</span></td></tr>';
+                        u += '<tr><td><small class="text-muted">UP:</small></td><td><span title="since ' + uf.since + '">' + uf.short + '</span></td></tr>';
                         u += "<tr><td><small class='text-muted'>V1:</small></td><td> " + v1voltage + "v</td></tr>";
                         if (s.P.BR != 48) {
                             u += "<tr><td><small class='text-muted'>V2:</small></td><td> " + v2voltage + "v</td></tr>";
@@ -2112,7 +2112,7 @@
                     var uf = formatUptime(parseInt(data.uptime));
 
                     var u = "<table class='multiSyncVerboseTable'>";
-                    u += '<tr><td><small class='text-muted'>UP:</small></td><td><span title="since ' + uf.since + '">' + uf.short + '</span></td></tr>';
+                    u += '<tr><td><small class="text-muted">UP:</small></td><td><span title="since ' + uf.since + '">' + uf.short + '</span></td></tr>';
                     u += "</table>";
 
                     var rowId = hostRows[ip.replace(/\./g, '_')];
@@ -2168,7 +2168,7 @@
                     var uf = formatUptime(data.system.uptime_seconds);
 
                     var u = "<table class='multiSyncVerboseTable'>";
-                    u += '<tr><td><small class='text-muted'>UP:</small></td><td><span title="since ' + uf.since + '">' + uf.short + '</span></td></tr>';
+                    u += '<tr><td><small class="text-muted">UP:</small></td><td><span title="since ' + uf.since + '">' + uf.short + '</span></td></tr>';
                     u += "</table>";
 
                     var rowId = hostRows[ip.replace(/\./g, '_')];
@@ -2221,7 +2221,7 @@
                     var uf = formatUptime(data.uptime);
 
                     var u = "<table class='multiSyncVerboseTable'>";
-                    u += '<tr><td><small class='text-muted'>UP:</small></td><td><span title="since ' + uf.since + '">' + uf.short + '</span></td></tr>';
+                    u += '<tr><td><small class="text-muted">UP:</small></td><td><span title="since ' + uf.since + '">' + uf.short + '</span></td></tr>';
                     u += "</table>";
 
                     var rowId = hostRows[ip.replace(/\./g, '_')];
