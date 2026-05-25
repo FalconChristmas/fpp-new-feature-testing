@@ -1066,26 +1066,47 @@
                         }
 
                         // Wifi path 1: interfaces-based (newer systems).
-                        // Only show icon when the polled IP itself is on a wifi interface
-                        // with an active link — a dual-homed device polled via eth0 gets no icon.
+                        // Show icon next to whichever IP in this row is on an active wifi
+                        // interface (link > 0). Covers both cases:
+                        //   - polled IP is the wifi IP (common case)
+                        //   - polled IP is eth0 but device's wlan0 IP is also shown in this row
                         var wifiIconHtml = '';
+                        var wifiIconIp = null;
                         if (data.hasOwnProperty('wifi') && data.hasOwnProperty('interfaces')) {
                             var ipIface = null;
+                            var anyWifiIface = null;
+                            var anyWifiIp = null;
+                            var rowIpHtml = (item._baseIpHtml || '') + (item._extraIpHtml || '');
                             for (var i = 0; i < data.interfaces.length; i++) {
                                 var iface = data.interfaces[i];
                                 if (iface.addr_info) {
                                     for (var j = 0; j < iface.addr_info.length; j++) {
-                                        if (iface.addr_info[j].local === ip) {
+                                        var addr = iface.addr_info[j].local;
+                                        if (addr === ip) {
                                             ipIface = iface;
-                                            break;
+                                        }
+                                        // Track any wifi interface whose IP is displayed in this row
+                                        if (!anyWifiIface && iface.hasOwnProperty('wifi') &&
+                                                (iface.wifi.link || 0) > 0 &&
+                                                rowIpHtml.indexOf(addr) !== -1) {
+                                            anyWifiIface = iface;
+                                            anyWifiIp = addr;
                                         }
                                     }
                                 }
-                                if (ipIface) break;
                             }
+                            // Prefer the polled IP's own wifi; fall back to any displayed wifi IP
+                            var wifiSource = null;
                             if (ipIface && ipIface.hasOwnProperty('wifi') &&
                                     (ipIface.wifi.link || 0) > 0) {
-                                var w = ipIface.wifi;
+                                wifiSource = ipIface;
+                                wifiIconIp = ip;
+                            } else if (anyWifiIface) {
+                                wifiSource = anyWifiIface;
+                                wifiIconIp = anyWifiIp;
+                            }
+                            if (wifiSource) {
+                                var w = wifiSource.wifi;
                                 var wifi_html = [];
                                 wifi_html.push('<span title="');
                                 if (w.pct) {
@@ -1102,7 +1123,21 @@
                                 wifiIconHtml = wifi_html.join('');
                             }
                         }
-                        item.ipaddress = (item._baseIpHtml || '') + wifiIconHtml + (item._extraIpHtml || '');
+                        // Insert wifi icon immediately after the correct IP's link.
+                        var base = item._baseIpHtml || '';
+                        var extra = item._extraIpHtml || '';
+                        if (wifiIconHtml && wifiIconIp) {
+                            var endTag = wifiIconIp + '</a>';
+                            if (base.indexOf(endTag) !== -1) {
+                                item.ipaddress = base.replace(endTag, endTag + wifiIconHtml) + extra;
+                            } else if (extra.indexOf(endTag) !== -1) {
+                                item.ipaddress = base + extra.replace(endTag, endTag + wifiIconHtml);
+                            } else {
+                                item.ipaddress = base.replace(wifiIconIp, wifiIconIp + wifiIconHtml) + extra;
+                            }
+                        } else {
+                            item.ipaddress = base + extra;
+                        }
 
                         if (item._dataIp !== ip) item._dataIp = ip;
 
@@ -1269,7 +1304,14 @@
                                         wifi_html.push('"></span>');
 
                                         wifiIconHtml = wifi_html.join('');
-                                        item.ipaddress = (item._baseIpHtml || '') + wifiIconHtml + (item._extraIpHtml || '');
+                                        var base2 = item._baseIpHtml || '';
+                                        var extra2 = item._extraIpHtml || '';
+                                        var endTag2 = ip + '</a>';
+                                        if (base2.indexOf(endTag2) !== -1) {
+                                            item.ipaddress = base2.replace(endTag2, endTag2 + wifiIconHtml) + extra2;
+                                        } else {
+                                            item.ipaddress = base2.replace(ip, ip + wifiIconHtml) + extra2;
+                                        }
                                     }
                                 }
 
@@ -1351,7 +1393,8 @@
             rowSpans = [];
             var systemsData = [];
 
-            var uniqueHosts = new Object();
+            // UUID → rowID. Each unique UUID = one physical device = one row.
+            var seenUuids = {};
 
             var fppIpAddresses = [];
             var wledIpAddresses = [];
@@ -1411,24 +1454,17 @@
                     continue;
                 }
 
-                var rowID = "fpp_" + ip.replace(/\./g, '_');
-                var newHost = 1;
+                var hostname = data[i].hostname || ip;
+
+                // Stable row ID: UUID when present, otherwise derive from IP.
+                // UUID guarantees one physical device = one row regardless of how
+                // many IPs multiSyncSystems lists for it.
+                var uuid = (data[i].uuid && data[i].uuid !== '') ? data[i].uuid : ('ip:' + ip);
+                var rowID = uuid.replace(/[^a-zA-Z0-9]/g, '_');
                 var hostRowKey = ip.replace(/\./g, '_');
 
-                var hostname = data[i].hostname;
-                if (hostname == "") {
-                    hostname = ip;
-                } else {
-                    var cleanHost = hostname.replace(/[^a-zA-Z0-9]/, '_');
-                    rowID = rowID + '_' + cleanHost;
-                }
-                // UUID is the authoritative dedup key; two IPs for the same device
-                // can report subtly different version strings and would create separate rows.
-                var hostKey = (data[i].uuid && data[i].uuid !== '')
-                    ? data[i].uuid
-                    : (hostname + '_' + data[i].fppModeString + '_' + data[i].channelRanges).replace(/[^a-zA-Z0-9]/, '_');
-
                 hostRows[hostRowKey] = rowID;
+                ipRows[data[i].address] = rowID;
 
                 var hnSpanStyle = "";
                 if (data[i].local) {
@@ -1445,159 +1481,150 @@
                         star += " onClick='updateMultiSyncRemotes(true);'>";
                     }
                 }
-                if (uniqueHosts.hasOwnProperty(hostKey)) {
-                    rowID = uniqueHosts[hostKey];
-                    hostRows[hostRowKey] = rowID;
-                    ipRows[data[i].address] = rowID;
 
-                    // Update the existing data item — no DOM row exists yet
-                    for (var si = 0; si < systemsData.length; si++) {
-                        if (systemsData[si]._id === rowID) {
-                            var extra = '<br>' + ipLink(data[i].address);
-                            if (data[i].fppModeString == 'remote') {
-                                extra += star;
-                            }
-                            systemsData[si].ipaddress += extra;
-                            systemsData[si]._baseIpHtml += extra;
-                            systemsData[si]._dataIplist += ',' + data[i].address;
-                            break;
-                        }
-                    }
+                if (seenUuids.hasOwnProperty(uuid)) {
+                    // Same physical device, additional IP — merge into existing row.
+                    // Do NOT add to poll list; the primary IP already covers this device.
+                    var mergeExtra = '<br>' + ipLink(data[i].address);
+                    if (data[i].fppModeString == 'remote') mergeExtra += star;
+                    var mergeItem = seenUuids[uuid]._item;
+                    mergeItem.ipaddress    += mergeExtra;
+                    mergeItem._baseIpHtml  += mergeExtra;
+                    mergeItem._dataIplist  += ',' + data[i].address;
+                    continue;
+                }
 
-                    // Do NOT add the duplicate IP to the poll list — the primary IP
-                    // already covers this device; two polls would race and overwrite each other.
-                } else {
-                    uniqueHosts[hostKey] = rowID;
-                    ipRows[data[i].address] = rowID;
+                // First time we see this UUID — create the row.
+                var fppMode = 'Player';
+                if (data[i].fppModeString == 'bridge') {
+                    fppMode = 'Bridge';
+                } else if (data[i].fppModeString == 'master') {
+                    fppMode = 'Master';
+                } else if (data[i].fppModeString == 'remote') {
+                    fppMode = 'Remote';
+                } else if (data[i].fppModeString == 'unknown') {
+                    fppMode = 'Unknown';
+                }
 
-                    var fppMode = 'Player';
-                    if (data[i].fppModeString == 'bridge') {
-                        fppMode = 'Bridge';
-                    } else if (data[i].fppModeString == 'master') {
-                        fppMode = 'Master';
-                    } else if (data[i].fppModeString == 'remote') {
-                        fppMode = 'Remote';
-                    } else if (data[i].fppModeString == 'unknown') {
-                        fppMode = 'Unknown';
-                    }
+                fppMode += getChannelIOIcons(data[i], data[i].address);
 
-                    fppMode += getChannelIOIcons(data[i], data[i].address);
+                rowSpans[rowID] = 1;
 
-                    rowSpans[rowID] = 1;
+                var ipTxt = data[i].local ? data[i].address : ipLink(data[i].address);
 
-                    var ipTxt = data[i].local ? data[i].address : ipLink(data[i].address);
+                if ((data[i].fppModeString == 'remote') && (star != ""))
+                    ipTxt = "<small>Select IPs for Unicast Sync</small><br>" + ipTxt + star;
 
-                    if ((data[i].fppModeString == 'remote') && (star != ""))
-                        ipTxt = "<small>Select IPs for Unicast Sync</small><br>" + ipTxt + star;
+                var hostTxt = (fppConfig.hideExternalURLs || data[i].local || data[i].address == hostname)
+                    ? hostname
+                    : "<a target='host_" + data[i].address + "' href='" + wrapUrlWithProxy(data[i].address, "/") + "'>" + hostname + "</a>";
 
-                    var hostTxt = (fppConfig.hideExternalURLs || data[i].local || data[i].address == hostname)
-                        ? hostname
-                        : "<a target='host_" + data[i].address + "' href='" + wrapUrlWithProxy(data[i].address, "/") + "'>" + hostname + "</a>";
+                var versionParts = data[i].version.split('.');
+                var majorVersion = 0;
+                if (data[i].version != 'Unknown')
+                    majorVersion = parseInt(versionParts[0]);
 
-                    var versionParts = data[i].version.split('.');
-                    var majorVersion = 0;
-                    if (data[i].version != 'Unknown')
-                        majorVersion = parseInt(versionParts[0]);
-
-                    var versionStr = data[i].version;
-                    var versionHtml;
-                    if (isFPP(data[i].typeId)) {
-                        versionStr = data[i].version.replace('.x-master', '.x').replace(/-g[A-Za-z0-9]*/, '');
-                        if (versionStr.endsWith('-dirty')) {
-                            versionStr = versionStr.replace('-dirty', '');
-                            var dirtyLink = "<br><a ";
-                            if (data[i].local) {
-                                dirtyLink += "href='settings.php#settings-developer'";
-                            } else {
-                                dirtyLink += "target='host_" + data[i].address + "' href='" + wrapUrlWithProxy(data[i].address, '/settings.php#settings-developer') + "'";
-                            }
-                            dirtyLink += ">Modified</a>";
-                            versionStr += dirtyLink;
-                        }
-                        versionHtml = "<table class='multiSyncVerboseTable'>" +
-                            "<tr><td>FPP:</td><td>" + versionStr + "</td></tr>" +
-                            "<tr><td>OS:</td><td></td></tr>" +
-                            "</table>";
-                    } else {
-                        versionHtml = data[i].version;
-                    }
-
-                    var selectboxHtml = '';
-                    if (isFPP(data[i].typeId) && majorVersion >= 4) {
-                        selectboxHtml = "<input type='checkbox' class='remoteCheckbox largeCheckbox multisyncRowCheckbox' name='" + data[i].address + "'>";
-                    }
-
-                    var ipDash = ip.replace(/\./g, '_');
-                    var typeIdHex = '0x' + parseInt(data[i].typeId).toString(16);
-
-                    systemsData.push({
-                        _id:           rowID,
-                        _dataIp:       data[i].address,
-                        _dataIplist:   data[i].address,
-                        _isFPP:        isFPP(data[i].typeId),
-                        _typeIdHex:    typeIdHex,
-                        _platformInit: data[i].type,
-                        _variantInit:  data[i].model,
-                        _versionStr:   versionStr,
-                        _baseIpHtml:   ipTxt,
-                        hostname:     "<span class='reorder-grip'><i class='rowGripIcon fpp-icon-grip'></i></span>" +
-                                      "<span id='fpp_" + ipDash + "_hostname'" + hnSpanStyle + ">" + hostTxt + "</span>" +
-                                      "<br><small class='hostDescriptionSM'></small>",
-                        ipaddress:    ipTxt,
-                        platform:     "<span id='" + rowID + "_platform'>" + data[i].type + "</span>" +
-                                      "<br><small id='" + rowID + "_variant'>" + data[i].model + "</small>" +
-                                      "<span class='hidden typeId'> " + typeIdHex + " </span>" +
-                                      "<span class='hidden version'>" + data[i].version + "</span>",
-                        mode:         fppMode,
-                        status:       'Last Seen:<br>' + data[i].lastSeenStr,
-                        elapsed:      '',
-                        version:      versionHtml,
-                        gitversions:  '',
-                        utilization:  '',
-                        fppcolor:     '',
-                        selectbox:    selectboxHtml
-                    });
-
-                    // For older FPP systems without channelOutputsEnabled, check remote config
-                    if (isFPP(data[i].typeId)) {
-                        checkRemoteChannelIO(data[i].address, rowID, data[i]);
-                    }
-
-                    $('#fppSystems').append(
-                        "<tr id='" + rowID + "_warnings' class='child-row warning-row'>" +
-                        "<td colspan='10' id='" + rowID + "_warningCell'></td></tr>"
-                    );
-                    $('#fppSystems').append(
-                        "<tr id='" + rowID + "_logs' style='display:none' class='logRow child-row'>" +
-                        "<td colspan='10' id='" + rowID + "_logCell'>" +
-                        "<table class='multiSyncVerboseTable' width='100%'>" +
-                        "<tr><td>Log:</td><td width='100%'><textarea id='" + rowID + "_logText' style='width: 100%;' rows='8' disabled></textarea></td></tr>" +
-                        "<tr><td></td><td><div class='right' id='" + rowID + "_doneButtons' style='display: none;'>" +
-                        "<input type='button' class='buttons' value='Restart FPPD' onClick='restartSystem(\"" + rowID + "\");' style='float: left;'>" +
-                        "<input type='button' class='buttons' value='Reboot' onClick='rebootRemoteFPP(\"" + rowID + "\", \"" + ip + "\");' style='float: left;'>" +
-                        "<input type='button' class='buttons' value='Close Log' onClick='$(\"#" + rowID + "_logs\").hide(); rowSpanSet(\"" + rowID + "\");'>" +
-                        "</div></td></tr></table></td></tr>"
-                    );
-
-                    if (isFPP(data[i].typeId)) {
-                        fppIpAddresses.push(ip);
-                    } else if (isESPixelStick(data[i].typeId)) {
-                        if ((majorVersion == 4) || (majorVersion == 0)) {
-                            getESPixelStickBridgeStatus(ip);
+                var versionStr = data[i].version;
+                var versionHtml;
+                if (isFPP(data[i].typeId)) {
+                    versionStr = data[i].version.replace('.x-master', '.x').replace(/-g[A-Za-z0-9]*/, '');
+                    if (versionStr.endsWith('-dirty')) {
+                        versionStr = versionStr.replace('-dirty', '');
+                        var dirtyLink = "<br><a ";
+                        if (data[i].local) {
+                            dirtyLink += "href='settings.php#settings-developer'";
                         } else {
-                            fppIpAddresses.push(ip);
+                            dirtyLink += "target='host_" + data[i].address + "' href='" + wrapUrlWithProxy(data[i].address, '/settings.php#settings-developer') + "'";
                         }
-                    } else if (isFalconV4(data[i].typeId)) {
-                        falconV4Addresses.push(ip);
-                    } else if (isFalcon(data[i].typeId)) {
-                        falconV3Addresses.push(ip);
-                    } else if (isWLED(data[i].typeId)) {
-                        wledIpAddresses.push(ip);
-                    } else if (isGenius(data[i].typeId)) {
-                        geniusIpAddresses.push(ip);
-                    } else if (isBaldrick(data[i].typeId)) {
-                        baldrickIpAddresses.push(ip);
+                        dirtyLink += ">Modified</a>";
+                        versionStr += dirtyLink;
                     }
+                    versionHtml = "<table class='multiSyncVerboseTable'>" +
+                        "<tr><td>FPP:</td><td>" + versionStr + "</td></tr>" +
+                        "<tr><td>OS:</td><td></td></tr>" +
+                        "</table>";
+                } else {
+                    versionHtml = data[i].version;
+                }
+
+                var selectboxHtml = '';
+                if (isFPP(data[i].typeId) && majorVersion >= 4) {
+                    selectboxHtml = "<input type='checkbox' class='remoteCheckbox largeCheckbox multisyncRowCheckbox' name='" + data[i].address + "'>";
+                }
+
+                var ipDash = ip.replace(/\./g, '_');
+                var typeIdHex = '0x' + parseInt(data[i].typeId).toString(16);
+
+                var newItem = {
+                    _id:           rowID,
+                    _dataIp:       data[i].address,
+                    _dataIplist:   data[i].address,
+                    _isFPP:        isFPP(data[i].typeId),
+                    _typeIdHex:    typeIdHex,
+                    _platformInit: data[i].type,
+                    _variantInit:  data[i].model,
+                    _versionStr:   versionStr,
+                    _baseIpHtml:   ipTxt,
+                    hostname:     "<span class='reorder-grip'><i class='rowGripIcon fpp-icon-grip'></i></span>" +
+                                  "<span id='fpp_" + ipDash + "_hostname'" + hnSpanStyle + ">" + hostTxt + "</span>" +
+                                  "<br><small class='hostDescriptionSM'></small>",
+                    ipaddress:    ipTxt,
+                    platform:     "<span id='" + rowID + "_platform'>" + data[i].type + "</span>" +
+                                  "<br><small id='" + rowID + "_variant'>" + data[i].model + "</small>" +
+                                  "<span class='hidden typeId'> " + typeIdHex + " </span>" +
+                                  "<span class='hidden version'>" + data[i].version + "</span>",
+                    mode:         fppMode,
+                    status:       'Last Seen:<br>' + data[i].lastSeenStr,
+                    elapsed:      '',
+                    version:      versionHtml,
+                    gitversions:  '',
+                    utilization:  '',
+                    fppcolor:     '',
+                    selectbox:    selectboxHtml
+                };
+                systemsData.push(newItem);
+                // Register so subsequent entries with the same UUID can find this item.
+                seenUuids[uuid] = { rowID: rowID, _item: newItem };
+
+                // For older FPP systems without channelOutputsEnabled, check remote config
+                if (isFPP(data[i].typeId)) {
+                    checkRemoteChannelIO(data[i].address, rowID, data[i]);
+                }
+
+                $('#fppSystems').append(
+                    "<tr id='" + rowID + "_warnings' class='child-row warning-row'>" +
+                    "<td colspan='10' id='" + rowID + "_warningCell'></td></tr>"
+                );
+                $('#fppSystems').append(
+                    "<tr id='" + rowID + "_logs' style='display:none' class='logRow child-row'>" +
+                    "<td colspan='10' id='" + rowID + "_logCell'>" +
+                    "<table class='multiSyncVerboseTable' width='100%'>" +
+                    "<tr><td>Log:</td><td width='100%'><textarea id='" + rowID + "_logText' style='width: 100%;' rows='8' disabled></textarea></td></tr>" +
+                    "<tr><td></td><td><div class='right' id='" + rowID + "_doneButtons' style='display: none;'>" +
+                    "<input type='button' class='buttons' value='Restart FPPD' onClick='restartSystem(\"" + rowID + "\");' style='float: left;'>" +
+                    "<input type='button' class='buttons' value='Reboot' onClick='rebootRemoteFPP(\"" + rowID + "\", \"" + ip + "\");' style='float: left;'>" +
+                    "<input type='button' class='buttons' value='Close Log' onClick='$(\"#" + rowID + "_logs\").hide(); rowSpanSet(\"" + rowID + "\");'>" +
+                    "</div></td></tr></table></td></tr>"
+                );
+
+                if (isFPP(data[i].typeId)) {
+                    fppIpAddresses.push(ip);
+                } else if (isESPixelStick(data[i].typeId)) {
+                    if ((majorVersion == 4) || (majorVersion == 0)) {
+                        getESPixelStickBridgeStatus(ip);
+                    } else {
+                        fppIpAddresses.push(ip);
+                    }
+                } else if (isFalconV4(data[i].typeId)) {
+                    falconV4Addresses.push(ip);
+                } else if (isFalcon(data[i].typeId)) {
+                    falconV3Addresses.push(ip);
+                } else if (isWLED(data[i].typeId)) {
+                    wledIpAddresses.push(ip);
+                } else if (isGenius(data[i].typeId)) {
+                    geniusIpAddresses.push(ip);
+                } else if (isBaldrick(data[i].typeId)) {
+                    baldrickIpAddresses.push(ip);
                 }
             }
             getFPPSystemStatus(fppIpAddresses, false);
