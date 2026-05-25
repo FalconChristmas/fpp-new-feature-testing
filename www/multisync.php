@@ -385,6 +385,34 @@
         }
 
         // ============================================================
+        // SECTION: Uptime formatting
+        // ============================================================
+
+        /**
+         * Format uptime seconds into a short 2-field string and a "since" timestamp.
+         *   uptimeShort("12d 3h")  or  "3h 42m"  — no zero-padding
+         * @param {number} seconds  — uptime in seconds
+         * @returns {{ short: string, since: string }}
+         */
+        function formatUptime(seconds) {
+            seconds = Math.round(+seconds || 0);
+            var days  = Math.floor(seconds / 86400);
+            var hours = Math.floor((seconds % 86400) / 3600);
+            var mins  = Math.floor((seconds % 3600) / 60);
+
+            var short = days > 0
+                ? days + 'd ' + hours + 'h'
+                : hours + 'h ' + mins + 'm';
+
+            var since = new Date(Date.now() - seconds * 1000);
+            var pad = function(n) { return String(n).padStart(2, '0'); };
+            var sinceStr = since.getFullYear() + '-' + pad(since.getMonth() + 1) + '-' + pad(since.getDate()) +
+                ' ' + pad(since.getHours()) + ':' + pad(since.getMinutes()) + ':' + pad(since.getSeconds());
+
+            return { short: short, since: sinceStr };
+        }
+
+        // ============================================================
         // SECTION: Network helpers
         // ============================================================
 
@@ -1038,10 +1066,8 @@
                             status += "<br><i class=\"fas fa-exclamation-triangle text-warning\"></i><span class='warning-text'>FPPD Restart Required</span>";
                         }
 
-                        var rowID = "fpp_" + ip.replace(/\./g, '_');
                         var hostRowKey = ip.replace(/\./g, '_');
-
-                        rowID = hostRows[hostRowKey];
+                        var rowID = hostRows[hostRowKey];
 
                         var item = $('#fppSystemsTable').bootstrapTable('getRowByUniqueId', rowID);
                         if (!item) return;
@@ -1198,14 +1224,14 @@
                             }
                             if (data.advancedView.hasOwnProperty("RemoteGitVersion")) {
                                 var u = "<table class='multiSyncVerboseTable'>";
-                                u += "<tr><td>Local:</td><td id='" + rowID + "_localgitvers'>";
+                                u += "<tr><td><small class='text-muted'>COMMIT:</small></td><td id='" + rowID + "_localgitvers'>";
                                 u += getLocalVersionLink(ip, data);
                                 u += "</td></tr>" +
-                                    "<tr><td>Branch:</td><td id='" + rowID + "_gitbranch'>" + data.advancedView.Branch + "</td></tr>";
+                                    "<tr><td><small class='text-muted'>BRANCH:</small></td><td id='" + rowID + "_gitbranch'>" + data.advancedView.Branch + "</td></tr>";
 
                                 if ((typeof (data.advancedView.UpgradeSource) !== 'undefined') &&
                                     (data.advancedView.UpgradeSource != 'github.com')) {
-                                    u += "<tr><td>Origin:</td><td id='" + rowID + "_origin'>" + data.advancedView.UpgradeSource + "</td></tr>";
+                                    u += "<tr><td><small class='text-muted'>ORIGIN:</small></td><td id='" + rowID + "_origin'>" + data.advancedView.UpgradeSource + "</td></tr>";
                                 } else {
                                     u += "<span style='display: none;' id='" + rowID + "_origin'></span>";
                                 }
@@ -1215,8 +1241,8 @@
 
                             if (data.advancedView.OSVersion !== "") {
                                 item.version = "<table class='multiSyncVerboseTable'>" +
-                                    "<tr><td>FPP:</td><td>" + item._versionStr + "</td></tr>" +
-                                    "<tr><td>OS:</td><td>" + data.advancedView.OSVersion + "</td></tr>" +
+                                    "<tr><td><small class='text-muted'>FPP:</small></td><td>" + item._versionStr + "</td></tr>" +
+                                    "<tr><td><small class='text-muted'>OS:</small></td><td>" + data.advancedView.OSVersion + "</td></tr>" +
                                     "</table>";
                             }
 
@@ -1252,10 +1278,10 @@
                                     diskHtml = "<b>Disk Usage:</b> unknown";
                                 }
                                 if (data.advancedView.Utilization.hasOwnProperty("CPU")) {
-                                    u += "<tr><td>CPU:</td><td>" + Math.round(data.advancedView.Utilization.CPU) + "%</td></tr>";
+                                    u += "<tr><td><small class='text-muted'>CPU:</small></td><td>" + Math.round(data.advancedView.Utilization.CPU) + "%</td></tr>";
                                 }
                                 if (data.advancedView.Utilization.hasOwnProperty("Memory")) {
-                                    u += "<tr><td>Mem:</td><td>" + Math.round(data.advancedView.Utilization.Memory) + "%</td></tr>";
+                                    u += "<tr><td><small class='text-muted'>MEM:</small></td><td>" + Math.round(data.advancedView.Utilization.Memory) + "%</td></tr>";
                                 }
                                 if (data.advancedView.Utilization.hasOwnProperty("MemoryFree")) {
                                     var fr = data.advancedView.Utilization.MemoryFree;
@@ -1316,26 +1342,24 @@
                                 }
 
                                 if (data.advancedView.Utilization.hasOwnProperty("Uptime")) {
-                                    var ut = data.advancedView.Utilization.Uptime;
-                                    if (typeof ut === "string" || ut instanceof String) {
-                                        ut = ut.replace(/ /, '&nbsp;');
+                                    var rawUt = data.advancedView.Utilization.Uptime;
+                                    var uptimeSec = null;
+                                    if (typeof rawUt !== "string" && !(rawUt instanceof String)) {
+                                        uptimeSec = rawUt / 1000;
                                     } else {
-                                        ut /= 1000;
-                                        ut = Math.round(ut);
-
-                                        var min = Math.round(ut / 60);
-                                        var hours = Math.round(min / 60);
-                                        min = Math.round(min % 60);
-                                        min = min.toString();
-                                        if (min.length < 2) {
-                                            min = "0" + min;
-                                        }
-                                        ut = hours.toString() + ":" + min.toString();
-
+                                        // "D days H:M" or "H:M"
+                                        var dm = String(rawUt).match(/(\d+)\s+days?\s+(\d+):(\d+)/);
+                                        var hm = String(rawUt).match(/^(\d+):(\d+)$/);
+                                        if (dm) uptimeSec = +dm[1]*86400 + +dm[2]*3600 + +dm[3]*60;
+                                        else if (hm) uptimeSec = +hm[1]*3600 + +hm[2]*60;
                                     }
-                                    u += "<tr><td>Up:&nbsp;</td><td>" + ut
-                                    u += ' <span data-bs-html="true" title="<span class=\'tooltipSpan\'>' + diskHtml + '<br><b>Uptime:</b> ' + ut;
-                                    u += '</span>">...</td></tr>'
+                                    if (uptimeSec !== null) {
+                                        var uf = formatUptime(uptimeSec);
+                                        u += "<tr><td><small class='text-muted'>UP:</small></td><td>";
+                                        u += '<span title="since ' + uf.since + '">' + uf.short + '</span>';
+                                        u += ' <span data-bs-html="true" title="<span class=\'tooltipSpan\'>' + diskHtml + '<br><b>Since:</b> ' + uf.since + '</span>">...</span>';
+                                        u += "</td></tr>";
+                                    }
                                 }
                             }
                             u += "</table>";
@@ -1456,10 +1480,14 @@
 
                 var hostname = data[i].hostname || ip;
 
-                // Stable row ID: UUID when present, otherwise derive from IP.
-                // UUID guarantees one physical device = one row regardless of how
-                // many IPs multiSyncSystems lists for it.
-                var uuid = (data[i].uuid && data[i].uuid !== '') ? data[i].uuid : ('ip:' + ip);
+                // Stable row ID: UUID when present, then hostname+mode, then IP.
+                // UUID guarantees one physical device = one row. For older devices
+                // without UUID, hostname+mode deduplicates multi-IP entries without
+                // the version-string mismatch that broke the original hostKey approach.
+                var rawHostname = data[i].hostname || '';
+                var uuid = (data[i].uuid && data[i].uuid !== '')
+                    ? data[i].uuid
+                    : (rawHostname !== '' ? 'host:' + rawHostname + ':' + (data[i].fppModeString || '') : 'ip:' + ip);
                 var rowID = uuid.replace(/[^a-zA-Z0-9]/g, '_');
                 var hostRowKey = ip.replace(/\./g, '_');
 
@@ -1776,11 +1804,24 @@
         // ============================================================
 
         var ESPSockets = {};
+        function espUpdateDescription(item, desc) {
+            if (item.hostname.indexOf("class='hostDescriptionSM'></small>") >= 0) {
+                item.hostname = item.hostname.replace(
+                    "class='hostDescriptionSM'></small>",
+                    "class='hostDescriptionSM'>" + desc + "</small>"
+                );
+            }
+        }
+
         function parseESPixelStickConfig(ip, data) {
             var s = JSON.parse(data);
-            var ips = ip.replace(/\./g, '_');
-
-            $('#fpp_' + ips + '_desc').html(s.device.id);
+            var $tbl = $('#fppSystemsTable');
+            var rowId = hostRows[ip.replace(/\./g, '_')];
+            var item = $tbl.bootstrapTable('getRowByUniqueId', rowId);
+            if (!item) return;
+            espUpdateDescription(item, s.device.id);
+            var bt = $tbl.data('bootstrap.table');
+            if (bt) bt.initBody();
         }
 
         function parseESPixelStickStatus(ip, data) {
@@ -1791,11 +1832,6 @@
                 s = s.status;
             }
 
-            if (s.hasOwnProperty('system')) {
-                if (s['system'].hasOwnProperty('hostname'))
-                    $('#fpp_' + ips + '_hostname').html(s.system.hostname);
-            }
-
             var rssi = +s.system.rssi;
             var quality = 2 * (rssi + 100);
 
@@ -1804,27 +1840,22 @@
             else if (rssi >= -50)
                 quality = 100;
 
-            var date = new Date(+s.system.uptime);
-            var uptime = '';
-
-            uptime += Math.floor(date.getTime() / 86400000) + " days, ";
-            uptime += ("0" + date.getUTCHours()).slice(-2) + ":";
-            uptime += ("0" + date.getUTCMinutes()).slice(-2) + ":";
-            uptime += ("0" + date.getUTCSeconds()).slice(-2);
+            var uf = formatUptime(+s.system.uptime / 1000);
 
             var u = "<table class='multiSyncVerboseTable'>";
             u += "<tr><td>RSSI:</td><td>" + rssi + "dBm / " + quality + "%</td></tr>";
-            u += "<tr><td>Uptime:</td><td>" + uptime + "</td></tr>";
+            u += '<tr><td>UP:</td><td><span title="since ' + uf.since + '">' + uf.short + '</span></td></tr>';
             u += "</table>";
 
-            var hostRowKey = ip.replace(/\./g, '_');
-            var rowId = hostRows[hostRowKey];
-            $('#advancedViewUtilization_' + rowId).html(u);
+            var $tbl = $('#fppSystemsTable');
+            var rowId = hostRows[ips];
+            var item = $tbl.bootstrapTable('getRowByUniqueId', rowId);
+            if (!item) return;
 
-            var mode = $('#fpp_' + ips + '_mode').html();
+            item.utilization = u;
 
-            if (mode == 'Bridge') {
-                st = 'Bridging';
+            if (item.mode === 'Bridge') {
+                var st = 'Bridging';
                 if (s.hasOwnProperty('e131')) {
                     st = "<table class='multiSyncVerboseTable'>";
                     st += "<tr><td>Tot Pkts:</td><td>" + s.e131.num_packets + "</td></tr>";
@@ -1841,9 +1872,11 @@
                         }
                     }
                 }
-
-                $('#' + rowId + '_status').html(st);
+                item.status = st;
             }
+
+            var bt = $tbl.data('bootstrap.table');
+            if (bt) bt.initBody();
 
             if ($('#MultiSyncRefreshStatus').is(":checked")) {
                 setTimeout(function () { ESPSockets[ips].send("XJ"); }, 1000);
@@ -1852,24 +1885,27 @@
 
         function parseESPixelStickVersion(ip, data) {
             var s = JSON.parse(data);
-            var ips = ip.replace(/\./g, '_');
-
-            if (s.hasOwnProperty('version')) {
-                $('#fpp_' + ips + '_version').html(s.version);
-                $('#fpp_' + ips).find('.version').html(s.version);
-                var versionParts = s['version'].split('.');
-            }
+            if (!s.hasOwnProperty('version')) return;
+            var $tbl = $('#fppSystemsTable');
+            var rowId = hostRows[ip.replace(/\./g, '_')];
+            var item = $tbl.bootstrapTable('getRowByUniqueId', rowId);
+            if (!item) return;
+            item.version = s.version;
+            item._versionStr = s.version;
+            var bt = $tbl.data('bootstrap.table');
+            if (bt) bt.initBody();
         }
 
         function parseESPixelStickCommandResponse(ip, data) {
             var s = JSON.parse(data);
-            var ips = ip.replace(/\./g, '_');
-
-            if ((s.hasOwnProperty('get')) &&
-                (s.get.hasOwnProperty('device')) &&
-                (s.get.device.hasOwnProperty('id'))) {
-                $('#fpp_' + ips + '_desc').html(s.get.device.id);
-            }
+            if (!s.hasOwnProperty('get') || !s.get.hasOwnProperty('device') || !s.get.device.hasOwnProperty('id')) return;
+            var $tbl = $('#fppSystemsTable');
+            var rowId = hostRows[ip.replace(/\./g, '_')];
+            var item = $tbl.bootstrapTable('getRowByUniqueId', rowId);
+            if (!item) return;
+            espUpdateDescription(item, s.get.device.id);
+            var bt = $tbl.data('bootstrap.table');
+            if (bt) bt.initBody();
         }
 
         function getESPixelStickBridgeStatus(ip) {
@@ -1949,35 +1985,33 @@
                 promises.push((async () => {
                     const r = await fetch("api/system/status?type=FV3" + ips3);
                     const alldata = await r.json();
+                    var $tbl = $('#fppSystemsTable');
                     Object.entries(alldata).forEach(function (entry) {
                         var ip = entry[0], data = entry[1];
-                        var ips = ip.replace(/\./g, '_');
+                        var rowId = hostRows[ip.replace(/\./g, '_')];
+                        var item = $tbl.bootstrapTable('getRowByUniqueId', rowId);
+                        if (!item) return;
+
                         var u = "<table class='multiSyncVerboseTable'>";
                         u += "<tr><td>Uptime:</td><td>" + data['u'] + "</td></tr>";
                         u += "<tr><td>V1 Voltage:</td><td> " + data['v1'] + "</td></tr>";
                         u += "<tr><td>V2 Voltage:</td><td> " + data['v2'] + "</td></tr>";
-
                         u += "</table>";
 
-                        $('#advancedViewUtilization_fpp_' + ips).html(u);
-
-                        var mode = $('#fpp_' + ips + '_mode').html();
-
-                        if (mode == 'Bridge') {
-                            $('#fpp_' + ips + '_status').html('Bridging');
-                        } else {
-                            $('#fpp_' + ips + '_status').html('');
-                        }
+                        item.utilization = u;
+                        item.status = (item.mode === 'Bridge') ? 'Bridging' : '';
                     });
+                    var bt = $tbl.data('bootstrap.table');
+                    if (bt) bt.initBody();
                 })());
             }
             if (ips4 != "") {
                 promises.push((async () => {
                     const r = await fetch("api/system/status?type=FV4" + ips4);
                     const alldata = await r.json();
+                    var $tbl = $('#fppSystemsTable');
                     Object.entries(alldata).forEach(function (entry) {
                         var ip = entry[0], s = entry[1];
-                        var ips = ip.replace(/\./g, '_');
 
                         var tempthreshold = s.P.BS;
                         var t1temp = s.P.T1 / 10;
@@ -1997,19 +2031,10 @@
                         var testmode = new Boolean(s.P.TS);
                         var overtemp = new Boolean(Math.max(t1temp, t2temp) > tempthreshold);
 
-                        var t = parseInt(s.P.U);
-                        var days = Math.floor(t / 86400);
-                        var hours = Math.floor((t - 86400 * days) / 3600);
-                        var mins = Math.floor((t - 86400 * days - 3600 * hours) / 60);
-
-                        var uptime = '';
-
-                        uptime += (days + " days, ");
-                        uptime += ("0" + hours).slice(-2) + ":";
-                        uptime += ("0" + mins).slice(-2);
+                        var uf = formatUptime(parseInt(s.P.U));
 
                         var u = "<table class='multiSyncVerboseTable'>";
-                        u += "<tr><td>Uptime:</td><td>" + uptime + "</td></tr>";
+                        u += '<tr><td>UP:</td><td><span title="since ' + uf.since + '">' + uf.short + '</span></td></tr>';
                         u += "<tr><td>V1 Voltage:</td><td> " + v1voltage + "v</td></tr>";
                         if (s.P.BR != 48) {
                             u += "<tr><td>V2 Voltage:</td><td> " + v2voltage + "v</td></tr>";
@@ -2017,15 +2042,15 @@
                         u += "<tr><td>Temp:</td><td> " + t1tempLabel + "</td></tr>";
                         u += "</table>";
 
-                        var hostRowKey = ip.replace(/\./g, '_');
-                        var rowId = hostRows[hostRowKey];
+                        var rowId = hostRows[ip.replace(/\./g, '_')];
+                        var item = $tbl.bootstrapTable('getRowByUniqueId', rowId);
+                        if (!item) return;
 
-                        $('#advancedViewUtilization_' + rowId).html(u);
-                        $('#' + rowId + '_status').html(s.status_name);
+                        item.utilization = u;
+                        item.status = s.status_name;
 
                         if (testmode == true || overtemp == true) {
-                            $('#' + rowId + '_warnings').removeAttr('style'); // Remove 'display: none' style
-                            // Ensure child rows match parent striping color
+                            $('#' + rowId + '_warnings').removeAttr('style');
                             if ($('#' + rowId).hasClass('odd'))
                                 $('#' + rowId + '_warnings').addClass('odd');
 
@@ -2036,6 +2061,8 @@
                             $('#' + rowId + '_warningCell').html(wHTML);
                         }
                     });
+                    var bt = $tbl.data('bootstrap.table');
+                    if (bt) bt.initBody();
                 })());
             }
             await Promise.allSettled(promises);
@@ -2064,37 +2091,30 @@
             try {
                 const r = await fetch("api/system/status?type=WLED" + ips);
                 const alldata = await r.json();
+                var $tbl = $('#fppSystemsTable');
                 Object.entries(alldata).forEach(function (entry) {
                     var ip = entry[0], data = entry[1];
                     if (data == null || data == "" || data == "null") {
                         return;
                     }
-                    var ips = ip.replace(/\./g, '_');
                     var rssi = data.wifi.rssi;
                     var quality = data.wifi.signal;
 
-                    var t = parseInt(data.uptime);
-                    var days = Math.floor(t / 86400);
-                    var hours = Math.floor((t - 86400 * days) / 3600);
-                    var mins = Math.floor((t - 86400 * days - 3600 * hours) / 60);
-
-                    var uptime = '';
-
-                    uptime += (days + " days, ");
-                    uptime += ("0" + hours).slice(-2) + ":";
-                    uptime += ("0" + mins).slice(-2);
+                    var uf = formatUptime(parseInt(data.uptime));
 
                     var u = "<table class='multiSyncVerboseTable'>";
                     u += "<tr><td>RSSI:</td><td>" + rssi + "dBm / " + quality + "%</td></tr>";
-                    u += "<tr><td>Uptime:</td><td>" + uptime + "</td></tr>";
+                    u += '<tr><td>UP:</td><td><span title="since ' + uf.since + '">' + uf.short + '</span></td></tr>';
                     u += "</table>";
 
-                    var hostRowKey = ip.replace(/\./g, '_');
-                    var rowId = hostRows[hostRowKey];
-
-                    $('#advancedViewUtilization_' + rowId).html(u);
-                    $('#' + rowId + '_status').html(data.status_name);
+                    var rowId = hostRows[ip.replace(/\./g, '_')];
+                    var item = $tbl.bootstrapTable('getRowByUniqueId', rowId);
+                    if (!item) return;
+                    item.utilization = u;
+                    item.status = data.status_name;
                 });
+                var bt = $tbl.data('bootstrap.table');
+                if (bt) bt.initBody();
             } finally {
                 if (Array.isArray(ipAddresses) && $('#MultiSyncRefreshStatus').is(":checked")) {
                     wledPoller.schedule(() => getWLEDControllerStatus(ipAddresses, true));
@@ -2122,37 +2142,32 @@
             try {
                 const r = await fetch("api/system/status?type=Genius" + ips);
                 const alldata = await r.json();
+                var $tbl = $('#fppSystemsTable');
                 Object.entries(alldata).forEach(function (entry) {
                     var ip = entry[0], data = entry[1];
                     if (data == null || data == "" || data == "null") {
                         return;
                     }
-                    var ips = ip.replace(/\./g, '_');
-                    var t = data.system.uptime_seconds;
-                    var days = Math.floor(t / 86400);
-                    var hours = Math.floor((t - 86400 * days) / 3600);
-                    var mins = Math.floor((t - 86400 * days - 3600 * hours) / 60);
-
-                    var uptime = '';
-                    uptime += (days + " days, ");
-                    uptime += ("0" + hours).slice(-2) + ":";
-                    uptime += ("0" + mins).slice(-2);
+                    var uf = formatUptime(data.system.uptime_seconds);
 
                     var u = "<table class='multiSyncVerboseTable'>";
-                    //u += "<tr><td>RSSI:</td><td>" + rssi + "dBm / " + quality + "%</td></tr>";
-                    u += "<tr><td>Uptime:</td><td>" + uptime + "</td></tr>";
+                    u += '<tr><td>UP:</td><td><span title="since ' + uf.since + '">' + uf.short + '</span></td></tr>';
                     u += "</table>";
 
-                    var hostRowKey = ip.replace(/\./g, '_');
-                    var rowId = hostRows[hostRowKey];
-                    $('#advancedViewUtilization_' + rowId).html(u);
-
-                    var origDesc = $('#' + rowId + '_desc').html();
-                    if (origDesc == '') {
-                        $('#' + rowId + '_desc').html(data.system.friendly_name);
+                    var rowId = hostRows[ip.replace(/\./g, '_')];
+                    var item = $tbl.bootstrapTable('getRowByUniqueId', rowId);
+                    if (!item) return;
+                    item.utilization = u;
+                    item.status = data.status_name;
+                    if (item.hostname.indexOf("class='hostDescriptionSM'></small>") >= 0) {
+                        item.hostname = item.hostname.replace(
+                            "class='hostDescriptionSM'></small>",
+                            "class='hostDescriptionSM'>" + data.system.friendly_name + "</small>"
+                        );
                     }
-                    $('#' + rowId + '_status').html(data.status_name);
                 });
+                var bt = $tbl.data('bootstrap.table');
+                if (bt) bt.initBody();
             } finally {
                 if (Array.isArray(ipAddresses) && $('#MultiSyncRefreshStatus').is(":checked")) {
                     geniusPoller.schedule(() => getGeniusControllerStatus(ipAddresses, true));
@@ -2180,57 +2195,51 @@
             try {
                 const r = await fetch("api/system/status?type=Baldrick" + ips);
                 const alldata = await r.json();
+                var $tbl = $('#fppSystemsTable');
                 Object.entries(alldata).forEach(function (entry) {
                     var ip = entry[0], data = entry[1];
                     if (data == null || data == "" || data == "null") {
                         return;
                     }
-                    var ips = ip.replace(/\./g, '_');
-                    var t = data.uptime;
-                    var days = Math.floor(t / 86400);
-                    var hours = Math.floor((t - 86400 * days) / 3600);
-                    var mins = Math.floor((t - 86400 * days - 3600 * hours) / 60);
-
-                    var uptime = '';
-                    uptime += (days + " days, ");
-                    uptime += ("0" + hours).slice(-2) + ":";
-                    uptime += ("0" + mins).slice(-2);
+                    var uf = formatUptime(data.uptime);
 
                     var u = "<table class='multiSyncVerboseTable'>";
-                    u += "<tr><td>Up:</td><td>" + uptime + "</td></tr>";
+                    u += '<tr><td>UP:</td><td><span title="since ' + uf.since + '">' + uf.short + '</span></td></tr>';
                     u += "</table>";
 
-                    var hostRowKey = ip.replace(/\./g, '_');
-                    var rowId = hostRows[hostRowKey];
-                    $('#advancedViewUtilization_' + rowId).html(u);
+                    var rowId = hostRows[ip.replace(/\./g, '_')];
+                    var item = $tbl.bootstrapTable('getRowByUniqueId', rowId);
+                    if (!item) return;
 
-                    var origDesc = $('#' + rowId + '_desc').html();
-                    if (origDesc == '') {
-                        $('#' + rowId + '_desc').html(data.board_model || data.hostname);
+                    item.utilization = u;
+                    if (item.hostname.indexOf("class='hostDescriptionSM'></small>") >= 0) {
+                        item.hostname = item.hostname.replace(
+                            "class='hostDescriptionSM'></small>",
+                            "class='hostDescriptionSM'>" + (data.board_model || data.hostname) + "</small>"
+                        );
                     }
 
-                    // Set status based on test mode
                     var status = 'Idle';
                     if (data.test_mode_active) {
                         status = 'Testing';
                     } else if (data.frame_rate && data.frame_rate > 0) {
                         status = 'Playing';
                     }
-                    $('#' + rowId + '_status').html(status);
+                    item.status = status;
 
-                    // Check for firmware update available
-                    var versionCell = $('#' + rowId + '_version');
                     if (data.ota && data.ota.current_firmware_version && data.ota.available_firmware_version) {
                         var current = data.ota.current_firmware_version;
                         var available = data.ota.available_firmware_version;
                         if (current !== available) {
-                            versionCell.html('<span class="text-warning" title="Update available: ' + available + '">' +
-                                current + ' <i class="fas fa-exclamation-triangle"></i></span>');
+                            item.version = '<span class="text-warning" title="Update available: ' + available + '">' +
+                                current + ' <i class="fas fa-exclamation-triangle"></i></span>';
                         } else {
-                            versionCell.html(current);
+                            item.version = current;
                         }
                     }
                 });
+                var bt = $tbl.data('bootstrap.table');
+                if (bt) bt.initBody();
             } finally {
                 if (Array.isArray(ipAddresses) && $('#MultiSyncRefreshStatus').is(":checked")) {
                     baldrickPoller.schedule(() => getBaldrickControllerStatus(ipAddresses, true));
@@ -2251,35 +2260,34 @@
         }
 
         function RefreshStats() {
-            var keys = Object.keys(hostRows);
-            var ips = [];
-            var gips = [];
-            var wips = [];
-            var bips = [];
-            var fv3ips = [];
-            var fv4ips = [];
+            var $tbl = $('#fppSystemsTable');
+            var ips = [], gips = [], wips = [], bips = [], fv3ips = [], fv4ips = [];
+            var seenRows = {};
 
-            for (var i = 0; i < keys.length; i++) {
-                var rowID = hostRows[keys[i]];
-                var ip = ipFromRowID(rowID);
-                var mode = $('#' + rowID + '_mode').html();
+            Object.keys(hostRows).forEach(function (key) {
+                var rowID = hostRows[key];
+                if (seenRows[rowID]) return;
+                seenRows[rowID] = true;
 
-                var typeId = $('#' + rowID).find('.typeId').html();
-                var version = $('#' + rowID).find('.version').html();
-                if (isFPP(typeId)) {
+                var item = $tbl.bootstrapTable('getRowByUniqueId', rowID);
+                if (!item) return;
+
+                var ip = item._dataIp;
+                var typeId = item._typeIdHex;
+
+                if (item._isFPP) {
                     ips.push(ip);
                 } else if (isESPixelStick(typeId)) {
-                    var versionParts = version.split('.');
-                    var majorVersion = parseInt(versionParts[0]);
+                    var majorVersion = parseInt((item._versionStr || '0').split('.')[0]);
                     if (majorVersion >= 4) {
                         getESPixelStickBridgeStatus(ip);
                     } else {
                         ips.push(ip);
                     }
-                } else if (isFalcon(typeId)) {
-                    fv3ips.push(ip);
                 } else if (isFalconV4(typeId)) {
                     fv4ips.push(ip);
+                } else if (isFalcon(typeId)) {
+                    fv3ips.push(ip);
                 } else if (isWLED(typeId)) {
                     wips.push(ip);
                 } else if (isGenius(typeId)) {
@@ -2287,7 +2295,8 @@
                 } else if (isBaldrick(typeId)) {
                     bips.push(ip);
                 }
-            }
+            });
+
             getFPPSystemStatus(ips, true);
             getGeniusControllerStatus(gips, true);
             getWLEDControllerStatus(wips, true);
