@@ -201,8 +201,6 @@
         }
         ?>;
 
-        var ipRows = new Object();
-
         class AutoRefreshController {
             constructor(intervalMs = 2000) {
                 this._timer = null;
@@ -1451,7 +1449,6 @@
             for (var i = 0; i < data.length; i++) {
                 var star = "";
                 var ip = data[i].address;
-                var hostDescription = "";
 
                 if (ip.indexOf('169.254') == 0)
                     continue;
@@ -1492,7 +1489,6 @@
                 var hostRowKey = ip.replace(/\./g, '_');
 
                 hostRows[hostRowKey] = rowID;
-                ipRows[data[i].address] = rowID;
 
                 var hnSpanStyle = "";
                 if (data[i].local) {
@@ -2315,15 +2311,6 @@
             }
         }
 
-        function reloadMultiSyncPage() {
-            if (streamCount) {
-                alert("FPP Systems are being updated, you will need to manually refresh once these updates are complete.");
-                return;
-            }
-
-            reloadPage();
-        }
-
         function syncModeUpdated(setting = '') {
             var multicastChecked = $('#MultiSyncMulticast').is(":checked");
             var broadcastChecked = $('#MultiSyncBroadcast').is(":checked");
@@ -3107,14 +3094,6 @@
             } else {
                 clearSelected();
             }
-        }
-
-        function closeAllLogs() {
-            $('.systemRow').each(function () {
-                var rowID = $(this).attr('id');
-                $('#' + rowID + '_logs').hide();
-                rowSpanSet(rowID);
-            });
         }
 
         // ============================================================
