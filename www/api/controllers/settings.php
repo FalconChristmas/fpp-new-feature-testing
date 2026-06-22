@@ -89,15 +89,32 @@ function PutSetting()
 
     WriteSettingToFile($setting, $value);
 
-    if (str_starts_with($setting, "LogLevel")) {
+    // Callers can pass ?skipApply=1 to persist the value WITHOUT running the
+    // (sometimes expensive) side effects that apply it. This is used to write a
+    // value that a different setting's apply step will pick up - e.g. the initial
+    // setup page writes osPassword with skipApply so that only the single
+    // osPasswordEnable apply runs chpasswd (yescrypt, ~3s) rather than running it
+    // twice (once for the value, once for the enable).
+    $skipApply = isset($_GET['skipApply']) && $_GET['skipApply'] == '1';
+
+    if ($skipApply) {
+        // Value already written above; the caller will apply it via another setting.
+    } else if (str_starts_with($setting, "LogLevel")) {
         SendCommand("LogLevel,$setting,$value,");
     } else if ($setting == "HostName") {
         $value = preg_replace("/[^-a-zA-Z0-9]/", "", $value);
+        // Run all the hostname updates in a single sudo/bash invocation rather than
+        // four separate sudo calls (each fork+sudo is slow on a BBB). This also
+        // fixes a latent bug: the original had no ';' before "hostname $value", so
+        // sed swallowed "sudo hostname $value" as extra filenames and the running
+        // hostname was never actually updated. $value is sanitized to [-a-zA-Z0-9].
         exec(
-            $SUDO . " sed -i 's/^.*\$/$value/' /etc/hostname ; " .
-            $SUDO . " sed -i '/^127.0.1.1[^0-9]/d' /etc/hosts ; " .
-            $SUDO . " sed -i '\$a127.0.1.1 $value' /etc/hosts " .
-            $SUDO . " hostname $value ; ",
+            $SUDO . " bash -c " . escapeshellarg(
+                "sed -i 's/^.*\$/$value/' /etc/hostname ; " .
+                "sed -i '/^127.0.1.1[^0-9]/d' /etc/hosts ; " .
+                "sed -i '\$a127.0.1.1 $value' /etc/hosts ; " .
+                "hostname $value"
+            ),
             $output,
             $return_val
         );
@@ -184,8 +201,6 @@ function PutSetting()
     } else if ($setting == "MediaBackend") {
         ApplySetting($setting, $value);
         SendCommand("SetSetting,$setting,$value,");
-        exec($SUDO . " " . $settings['fppDir'] . "/src/fppinit setupAudio", $output, $return_val);
-        unset($output);
         // When switching INTO Simple PipeWire mode, generate and apply the
         // single-card / single-display config from the existing AudioOutput
         // / VideoOutput selections.  Advanced-mode JSON files are left
@@ -193,7 +208,7 @@ function PutSetting()
         $settings[$setting] = $value;
         if (IsSimplePipeWireBackend($settings)) {
             ob_start();
-            ApplyPipeWireSimpleConfig();
+            ApplyPipeWireSimpleConfig(true);
             ob_end_clean();
         } else if (IsPipeWireBackend($settings)) {
             // Switching INTO Advanced PipeWire mode: re-apply the saved
@@ -206,10 +221,22 @@ function PutSetting()
             // buses target the output groups and write the final
             // PipeWireSinkName, e.g. fpp_input_mix_bus_1).
             ob_start();
-            ApplyPipeWireAudioGroups();
-            ApplyPipeWireInputGroups();
+            ApplyPipeWireAudioGroups(null, true);
+            ApplyPipeWireInputGroups(true);
             ob_end_clean();
         }
+        // Config files are written above (fast). Now background fppinit setupAudio +
+        // PipeWire service restarts so the HTTP response returns immediately.
+        // Using < /dev/null ensures the background process fully detaches from Apache.
+        $fppDir = $settings['fppDir'];
+        $bgScript =
+            $SUDO . " " . escapeshellarg($fppDir . "/src/fppinit") . " setupAudio\n" .
+            $SUDO . " /usr/bin/systemctl restart fpp-pipewire.service\n" .
+            "sleep 0.5\n" .
+            $SUDO . " /usr/bin/systemctl restart fpp-wireplumber.service\n" .
+            "for i in 1 2 3 4 5 6 7 8 9 10; do [ -e /run/pipewire-fpp/pipewire-0 ] && break; sleep 0.25; done\n" .
+            $SUDO . " /usr/bin/systemctl restart fpp-pipewire-pulse.service\n";
+        exec("nohup bash -c " . escapeshellarg($bgScript) . " < /dev/null > /dev/null 2>&1 &");
     } else if ($setting == "EnableTethering") {
         $ssid = ReadSettingFromFile("TetherSSID");
         $psk = ReadSettingFromFile("TetherPSK");
@@ -230,8 +257,14 @@ function PutSetting()
         SendCommand("SetSetting,$setting,$value,");
     }
 
+    //Callers saving many settings in a row (e.g. the initial setup page) can pass
+    //?skipBackup=1 to avoid generating a full configuration backup on every single
+    //setting - the backup is expensive on slower devices - and instead create one
+    //backup once all the settings have been saved.
+    $skipBackup = isset($_GET['skipBackup']) && $_GET['skipBackup'] == '1';
+
     //If the setting being set isn't the reboot or restart flag (we don't want to trigger a backup on these)
-    if (in_array(ltrim(rtrim($setting)), array('restartFlag', 'rebootFlag', 'currentHeaderSensor')) === false) {
+    if (!$skipBackup && in_array(ltrim(rtrim($setting)), array('restartFlag', 'rebootFlag', 'currentHeaderSensor')) === false) {
         //Make a call to the configuration backup API endpoint so we can generate a backup
         $backup_comment = GenerateBackupComment($setting, $value);
         GenerateBackupViaAPI($backup_comment);

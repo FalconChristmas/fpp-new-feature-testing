@@ -139,6 +139,7 @@ private:
         int width = 0;
         int height = 0;
         std::string scaling;        // "fit", "fill", "stretch"
+        int assignedPlaneId = -1;   // DRM overlay plane reserved for this consumer's kmssink; released in StopConsumer
 
         // Overlay-specific
         std::string overlayModel;
@@ -249,6 +250,10 @@ private:
     std::string m_activeProducer;  // node name of the current producer, empty if none
     int m_primaryConnectorId = -1; // DRM connector ID used by primary pipeline's kmssink
     bool m_initialized = false;
+    // Guards Shutdown() so the destructor doesn't re-run it after main() already
+    // did (the "Shutdown complete" was logged twice). Harmless today since it
+    // only locks our own mutex, but keeps teardown single-shot and future-proof.
+    std::atomic<bool> m_shutdownDone{false};
 
     // Pipeline teardown tracking — detached threads decrement the counter
     // and notify the CV when done, so callers can wait for CMA to be freed.

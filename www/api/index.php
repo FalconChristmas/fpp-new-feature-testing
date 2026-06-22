@@ -99,6 +99,7 @@ dispatch_post('/network/presisentNames', 'network_persistentNames_create');
 dispatch_delete('/network/persistentNames', 'network_persistentNames_delete');
 dispatch_post('/network/persistentNames', 'network_persistentNames_create');
 dispatch_get('/network/wifi/scan/:interface', 'network_wifi_scan');
+dispatch_get('/network/wifi/status/:interface', 'network_wifi_status');
 dispatch_get('/network/wifi/strength', 'network_wifi_strength');
 
 dispatch_get('/options/:SettingName', 'GetOptions');
@@ -151,6 +152,12 @@ dispatch_post('/pipewire/aes67/instances', 'SaveAES67Instances');
 dispatch_post('/pipewire/aes67/apply', 'ApplyAES67Instances');
 dispatch_get('/pipewire/aes67/status', 'GetAES67Status');
 dispatch_get('/pipewire/aes67/interfaces', 'GetAES67NetworkInterfaces');
+
+dispatch_get('/pipewire/opusrtp/instances', 'GetOpusRTPInstances');
+dispatch_post('/pipewire/opusrtp/instances', 'SaveOpusRTPInstances');
+dispatch_post('/pipewire/opusrtp/apply', 'ApplyOpusRTPInstances');
+dispatch_get('/pipewire/opusrtp/status', 'GetOpusRTPStatus');
+dispatch_get('/pipewire/opusrtp/interfaces', 'GetOpusRTPNetworkInterfaces');
 dispatch_get('/pipewire/graph', 'GetPipeWireGraph');
 
 // PipeWire control facade — clean, ID-addressed, live-state 3rd-party API

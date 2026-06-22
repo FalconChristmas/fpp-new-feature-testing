@@ -5,12 +5,18 @@ function SetTimeZone($timezone)
     if (file_exists("/etc/fpp/container")) {
         exec("sudo ln -s -f /usr/share/zoneinfo/$timezone /etc/localtime");
         exec("sudo bash -c \"echo $timezone > /etc/timezone\"");
+        // We wrote /etc/timezone by hand; sync tzdata's caches/symlink.
+        exec("sudo dpkg-reconfigure -f noninteractive tzdata");
     } else if (file_exists('/usr/bin/timedatectl')) {
+        // timedatectl set-timezone already updates /etc/localtime and the system
+        // timezone, so the (slow, ~5s on a BBB) dpkg-reconfigure tzdata step that
+        // used to run here is redundant and just made saving the setting hang.
         exec("sudo timedatectl set-timezone $timezone");
     } else {
         exec("sudo bash -c \"echo $timezone > /etc/timezone\"");
+        // No timedatectl available; dpkg-reconfigure applies /etc/timezone.
+        exec("sudo dpkg-reconfigure -f noninteractive tzdata");
     }
-    exec("sudo dpkg-reconfigure -f noninteractive tzdata");
 }
 
 function SetHWClock()
@@ -115,10 +121,15 @@ function SetUIPassword($value)
         $value = 'falcon';
     }
 
-    // Write a new password file, replacing odl one if exists.
-    // users fpp and admin
-    // BCRYPT requires apache 2.4+
-    $encrypted_password = password_hash($value, PASSWORD_BCRYPT);
+    // Write a new password file, replacing old one if exists; users fpp and admin.
+    //
+    // Apache mod_auth_basic re-verifies the htpasswd hash on EVERY request with no
+    // caching. bcrypt (PHP 8.4 bumped the default to cost 12) takes ~1.4s per verify
+    // on a BBB, so every page - which fires many API/asset requests - stacked up to
+    // ~10s of unresponsiveness. The UI password is a low-value secret on a LAN device
+    // (the plaintext is even kept in the settings file), so use apache's fast
+    // unsalted SHA-1 ({SHA}) htpasswd format, which verifies in microseconds.
+    $encrypted_password = "{SHA}" . base64_encode(sha1($value, true));
     $data = "admin:$encrypted_password\nfpp:$encrypted_password\n";
     $filename = $settings['mediaDirectory'] . "/config/.htpasswd";
 
@@ -279,11 +290,11 @@ function SetupLocalMQTTBroker($value)
         if ($value == '0') {
             //remove local broker config and restart the service
             exec("sudo rm -f /etc/mosquitto/conf.d/fpp_local_broker.conf", $output, $return_val);
-            exec("sudo systemctrl stop mosquitto >/dev/null &");
-            exec("sudo systemctrl disable mosquitto >/dev/null &");
+            exec("sudo systemctl stop mosquitto >/dev/null &");
+            exec("sudo systemctl disable mosquitto >/dev/null &");
         } else if ($value == '1') {
             //generate mosquitto password file
-            $password = GetSettingValue('osPassword');
+            $password = GetSettingValue('MQTTPassword');
             if ($password == '') {
                 $password = 'fpp';
             }
@@ -292,6 +303,8 @@ function SetupLocalMQTTBroker($value)
                 error_log("Error creating mosquitto password file: " . implode("\n", $output));
                 return;
             }
+            exec("sudo chown mosquitto:mosquitto /etc/mosquitto/passwd");
+            exec("sudo chmod 640 /etc/mosquitto/passwd");
 
             //generate local broker config and restart the service
             $config = "listener 1883\n";
@@ -388,6 +401,11 @@ function ApplySetting($setting, $value)
         case 'Service_MQTT_localbroker':
             SetupLocalMQTTBroker($value);
             break;
+        case 'MQTTPassword':
+            if (GetSettingValue('Service_MQTT_localbroker') == '1') {
+                SetupLocalMQTTBroker('1');
+            }
+            break;
         default:
             ApplyServiceSetting($setting, $value, "--now");
             break;
@@ -413,21 +431,12 @@ function setVolume($vol)
     $status = SendCommand('v,' . $vol . ',');
 
     if ($settings["Platform"] != "MacOS") {
-        $card = 0;
-        if (isset($settings['AudioOutput'])) {
-            $card = $settings['AudioOutput'];
-        } else {
-            exec($SUDO . " grep card /root/.asoundrc | head -n 1 | awk '{print $2}'", $output, $return_val);
-            if ($return_val) {
-                // Should we error here, or just move on?
-                // Technically this should only fail on non-pi
-                // and pre-0.3.0 images
-                $rc = "Error retrieving current sound card, using default of '0'!";
-            } else {
-                $card = $output[0];
-            }
-
-            WriteSettingToFile("AudioOutput", $card);
+        // AudioOutput is stored as a stable ALSA card ID; amixer needs the
+        // numeric card index, so resolve it (legacy numeric values pass through).
+        $cardId = isset($settings['AudioOutput']) ? $settings['AudioOutput'] : '';
+        $card = ResolveAlsaCardIdToNumber($cardId);
+        if ($card === '') {
+            $card = ctype_digit((string) $cardId) ? $cardId : '0';
         }
 
         $mixerDevice = "PCM";

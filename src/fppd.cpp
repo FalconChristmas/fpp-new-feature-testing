@@ -78,6 +78,7 @@
 #include "channeltester/ChannelTester.h"
 #include "commands/Commands.h"
 #include "mediaoutput/AES67Manager.h"
+#include "mediaoutput/OpusRTPManager.h"
 #include "mediaoutput/MediaOutputBase.h"
 #include "mediaoutput/MediaOutputStatus.h"
 #include "mediaoutput/VideoInputManager.h"
@@ -389,8 +390,15 @@ static void handleCrash(int s, siginfo_t* si, void* ctx) {
         // instead of the entire process.  This allows fppd to survive
         // DRM/KMS buffer crashes in video consumer threads while keeping
         // audio and other functionality running.
+#ifndef PLATFORM_OSX
         if (s == SIGBUS && gettid() != getpid()) {
             LogErr(VB_ALL, "SIGBUS in non-main thread %u — terminating thread only\n", gettid());
+#else
+        if (s == SIGBUS && !pthread_main_np()) {
+            uint64_t tid = 0;
+            pthread_threadid_np(NULL, &tid);
+            LogErr(VB_ALL, "SIGBUS in non-main thread %llu — terminating thread only\n", tid);
+#endif
             WarningHolder::AddWarning(1, "Video thread crashed (SIGBUS). Video output may be unavailable.");
             WarningHolder::WriteWarningsFile();
             // Restore default SIGBUS handler for this thread so the
@@ -734,6 +742,7 @@ int main(int argc, char* argv[]) {
 
         if (!mqtt || !mqtt->Init(getSetting("MQTTUsername").c_str(), getSetting("MQTTPassword").c_str(), getSetting("MQTTCaFile").c_str())) {
             LogWarn(VB_CONTROL, "MQTT Init failed. Starting without MQTT. -- Maybe MQTT host doesn't resolve\n");
+            WarningHolder::AddWarning(4, "MQTT init failed at startup - check the MQTT host/port settings");
         } else {
             Events::AddEventHandler(mqtt);
         }
@@ -830,6 +839,10 @@ int main(int argc, char* argv[]) {
     AES67Manager::INSTANCE.Init();
     AES67Manager::INSTANCE.ApplyConfig();
 #endif
+#ifdef HAS_OPUS_RTP_GSTREAMER
+    OpusRTPManager::INSTANCE.Init();
+    OpusRTPManager::INSTANCE.ApplyConfig();
+#endif
     VideoInputManager::Instance().Init();
     VideoOutputManager::Instance().Init();
     PixelOverlayManager::INSTANCE.Initialize();
@@ -871,6 +884,9 @@ int main(int argc, char* argv[]) {
 #ifdef HAS_AES67_GSTREAMER
     AES67Manager::INSTANCE.Shutdown();
 #endif
+#ifdef HAS_OPUS_RTP_GSTREAMER
+    OpusRTPManager::INSTANCE.Shutdown();
+#endif
     CleanupMediaOutput();
     CloseEffects();
     CloseChannelOutputs();
@@ -878,9 +894,12 @@ int main(int argc, char* argv[]) {
     WLEDAudioSync::INSTANCE.Cleanup();
     PingManager::INSTANCE.Cleanup();
     OutputMonitor::INSTANCE.Cleanup();
+    // Plugins must clean up before CommandManager: their unregister hooks
+    // pull the commands they own out of the registry so CommandManager's
+    // bulk delete below doesn't free objects a plugin still references.
+    PluginManager::INSTANCE.Cleanup();
     CommandManager::INSTANCE.Cleanup();
     MultiSync::INSTANCE.ShutdownSync();
-    PluginManager::INSTANCE.Cleanup();
     GPIOManager::INSTANCE.Cleanup();
 
     delete scheduler;
@@ -919,6 +938,25 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    // Every subsystem was torn down explicitly above, so the C++ global/static
+    // singleton destructors that would run on a normal return are redundant --
+    // and crash-prone. Two distinct failure modes show up in the crash reports:
+    //   * macOS: a noexcept destructor locks a mutex belonging to an
+    //     already-destroyed singleton (or one a still-draining drogon thread is
+    //     touching); libc++ throws EINVAL ("mutex lock failed: Invalid
+    //     argument") from that lock, which escapes the noexcept dtor and calls
+    //     std::terminate.
+    //   * Linux: a file-static std::thread (the Events publish thread, the
+    //     WarningHolder notify thread, ...) that is still joinable when
+    //     __cxa_finalize destroys it -> std::thread::~thread calls
+    //     std::terminate. The orderly shutdown above joins these, but a late
+    //     restart (e.g. an event reconfigure during the drawn-out shutdown) can
+    //     leave one joinable again. This is the single most common fppd crash
+    //     on the dashboard, so the same _exit() shortcut macOS uses is applied
+    //     on Linux too.
+    // Flush and exit now, skipping the redundant (and crash-prone) teardown.
+    fflush(nullptr);
+    _exit(0);
     return 0;
 }
 
@@ -1002,6 +1040,7 @@ void MainLoop(void) {
         }
     }
     std::time_t minValidTime = std::mktime(&minValidDate);
+    bool clockWarningAdded = false;
 
     StartChannelOutputThread();
     if (!getSettingInt("restarted")) {
@@ -1018,8 +1057,10 @@ void MainLoop(void) {
             scheduler->CheckIfShouldBePlayingNow();
         } else {
             struct tm* timeinfo = localtime(&now);
-            LogWarn(VB_SCHEDULE, "Clock appears incorrect (date %04d-%02d-%02d before release), delaying scheduler start until time sync\n", 
+            LogWarn(VB_SCHEDULE, "Clock appears incorrect (date %04d-%02d-%02d before release), delaying scheduler start until time sync\n",
                     timeinfo->tm_year + 1900, timeinfo->tm_mon + 1, timeinfo->tm_mday);
+            WarningHolder::AddWarning(55, "System clock not set - scheduler start delayed until time sync");
+            clockWarningAdded = true;
         }
     }
     if (CommandManager::INSTANCE.HasPreset("FPPD_STARTED")) {
@@ -1117,6 +1158,11 @@ void MainLoop(void) {
         // Only run scheduler if clock appears valid (same check as initial scheduler start)
         std::time_t now = time(nullptr);
         if (now >= minValidTime) {
+            if (clockWarningAdded) {
+                // clock was corrected (time sync) since startup — clear the warning
+                WarningHolder::RemoveWarning(55, "System clock not set - scheduler start delayed until time sync");
+                clockWarningAdded = false;
+            }
             scheduler->ScheduleProc();
         }
 

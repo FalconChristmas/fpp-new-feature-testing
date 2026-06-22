@@ -137,6 +137,7 @@ int Playlist::LoadJSONIntoPlaylist(std::vector<PlaylistEntryBase*>& playlistPart
                     LoadJSONIntoPlaylist(playlistPart, subPlaylist["leadOut"], 0, tmpMax);
             } else {
                 LogErr(VB_PLAYLIST, "Error, recursive playlist.  Sub-playlist depth exceeded 5 trying to include '%s'\n", entries[c]["name"].asString().c_str());
+                WarningHolder::AddWarningTimeout(60, 24, "Recursive playlist: sub-playlist depth exceeded trying to include '" + entries[c]["name"].asString() + "'");
             }
 
             m_subPlaylistDepth--;
@@ -292,7 +293,7 @@ Json::Value Playlist::LoadJSON(const std::string& filename) {
     if (!LoadJsonFromFile(filename, root)) {
         std::string warn = "Could not load playlist ";
         warn += filename;
-        WarningHolder::AddWarningTimeout(warn, 30);
+        WarningHolder::AddWarningTimeout(30, 24, warn);
         LogErr(VB_PLAYLIST, "Error loading %s\n", filename.c_str());
         return root;
     }
@@ -390,7 +391,7 @@ int Playlist::Load(const std::string& filename) {
                         if (tmpMedia == "") {
                             std::string warn = "fseq \"" + tmpFilename + "\" lists a media file of \"" + mediaName + "\" but it can not be found";
 
-                            WarningHolder::AddWarningTimeout(warn, 60);
+                            WarningHolder::AddWarningTimeout(60, 24, warn);
                             LogDebug(VB_PLAYLIST, "%s\n", warn.c_str());
                             mediaName = "";
                         }
@@ -456,7 +457,7 @@ int Playlist::Load(const std::string& filename) {
     } catch (std::exception& er) {
         std::string warn = "Playlist " + GetPlaylistName() + " is invalid: " + er.what();
         LogWarn(VB_PLAYLIST, "%s\n", warn.c_str());
-        WarningHolder::AddWarningTimeout(warn, 60);
+        WarningHolder::AddWarningTimeout(60, 24, warn);
         return 0;
     }
 }
@@ -497,6 +498,7 @@ PlaylistEntryBase* Playlist::LoadPlaylistEntry(Json::Value entry) {
         result = new PlaylistEntryCommand(this);
     else {
         LogErr(VB_PLAYLIST, "Unknown Playlist Entry Type: %s\n", entry["type"].asString().c_str());
+        WarningHolder::AddWarningTimeout(60, 24, "Unknown playlist entry type: " + entry["type"].asString());
         return NULL;
     }
 
@@ -594,7 +596,7 @@ int Playlist::Start(void) {
         (!m_mainPlaylist.size()) &&
         (!m_leadOut.size())) {
         std::string warn = "Playlist " + GetPlaylistName() + " is empty. Nothing to play.";
-        WarningHolder::AddWarningTimeout(warn, 30);
+        WarningHolder::AddWarningTimeout(30, 24, warn);
 
         SetIdle();
         return 0;
@@ -668,8 +670,11 @@ int Playlist::StopNow(int forceStop) {
         return 1;
     }
 
-    // Stop all background stream slots
-    StreamSlotManager::Instance().StopAllSlots();
+    // Stop background stream slots (2-5).  Slot 1 is stopped by the current
+    // entry's Stop() below, which sends the MultiSync media stop packet
+    // BEFORE the (slow) pipeline teardown — stopping slot 1 here first would
+    // delay that packet by ~0.5s and make remotes stop late (issue #2676).
+    StreamSlotManager::Instance().StopBackgroundSlots();
 
     std::map<std::string, std::string> keywords;
     keywords["PLAYLIST_NAME"] = m_name;
@@ -1757,10 +1762,11 @@ void Playlist::GetCurrentStatus(Json::Value& result) {
         result["time_elapsed"] = "00:00";
         result["time_remaining"] = "00:00";
         
-        // Still provide global pause info even when idle
+        // Still provide global pause and random info even when idle
         result["global_pause"]["configured"] = m_globalPauseBetweenSequencesMS > 0;
         result["global_pause"]["duration_ms"] = m_globalPauseBetweenSequencesMS;
         result["global_pause"]["active"] = false; // Always false when idle
+        result["random"] = m_random;
         return;
     }
 
@@ -1769,6 +1775,8 @@ void Playlist::GetCurrentStatus(Json::Value& result) {
     result["current_playlist"]["description"] = m_desc;
     result["current_playlist"]["count"] = std::to_string(GetSize());
     result["current_playlist"]["index"] = std::to_string(GetPosition());
+
+    result["random"] = m_random;
 
     // Global pause between sequences status
     result["global_pause"]["configured"] = m_globalPauseBetweenSequencesMS > 0;

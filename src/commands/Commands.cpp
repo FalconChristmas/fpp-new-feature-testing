@@ -115,6 +115,10 @@ void CommandManager::Init() {
     addCommand(new AES67TestCommand());
     addCommand(new ApplyRoutingPresetCommand());
 #endif
+#ifdef HAS_OPUS_RTP_GSTREAMER
+    addCommand(new OpusRTPApplyCommand());
+    addCommand(new OpusRTPCleanupCommand());
+#endif
     addCommand(new PlaylistPauseCommand());
     addCommand(new PlaylistResumeCommand());
     addCommand(new TriggerPresetCommand());
@@ -185,6 +189,17 @@ CommandManager::~CommandManager() {
 }
 
 void CommandManager::Cleanup() {
+    // Idempotent: main() calls this during shutdown, and ~CommandManager() calls
+    // it again at static-destruction time. The FileMonitor::INSTANCE.RemoveFile()
+    // reach-in below locks a mutex on the global FileMonitor singleton, which may
+    // already be destroyed by then (cross-TU static destruction order) -- locking
+    // a destroyed mutex throws out of the noexcept dtor -> std::terminate. A
+    // function-local guard keeps the second call a no-op without changing the
+    // (plugin-facing) Commands.h ABI.
+    static std::atomic<bool> cleanedUp{false};
+    if (cleanedUp.exchange(true)) {
+        return;
+    }
     FileMonitor::INSTANCE.RemoveFile("CommandManager:CommandPresets.json", FPP_DIR_CONFIG("/commandPresets.json"));
     while (!commands.empty()) {
         Command* cmd = commands.begin()->second;
@@ -302,6 +317,49 @@ std::unique_ptr<Command::Result> CommandManager::run(const Json::Value& cmd) {
     return run(command, cmd["args"]);
 }
 
+// --------------------------------------------------------------------------
+// OpenAPI docs for the /command(s) and /commandPresets endpoints handled below.
+// --------------------------------------------------------------------------
+
+/**
+ * List all available commands and their argument descriptions.
+ *
+ * @route GET /api/commands
+ * @response 200 Array of command descriptions.
+ */
+
+/**
+ * Get the description of a single command by name.
+ *
+ * @route GET /api/commands/{command}
+ * @response 200 The command description.
+ * @response 404 No command with that name exists.
+ */
+
+/**
+ * Get the saved command presets (config/commandPresets.json).
+ *
+ * @route GET /api/commandPresets
+ * @param boolean names Return just the preset names instead of full definitions.
+ * @response 200 Command presets (or preset names when `names=true`).
+ */
+
+/**
+ * Get a single command preset by name.
+ *
+ * @route GET /api/commandPresets/{name}
+ * @response 200 The preset definition.
+ */
+
+/**
+ * Run a command by name via GET, passing arguments as extra path segments
+ * (e.g. /api/command/Volume%20Set/50).
+ *
+ * @route GET /api/command/{command}
+ * @response 200 Command result (text/plain).
+ * @response 404 No command with that name exists.
+ * @response 500 The command errored or timed out.
+ */
 HttpResponsePtr CommandManager::render_GET(const HttpRequestPtr& req) {
     auto parts = getPathPieces(req->path());
     int plen = parts.size();
@@ -395,6 +453,23 @@ HttpResponsePtr CommandManager::render_GET(const HttpRequestPtr& req) {
     return makeStringResponse("Not Found", 404, "text/plain");
 }
 
+/**
+ * Run a command described by the posted JSON object (with `command` and `args`).
+ *
+ * @route POST /api/command
+ * @body {"command": "Volume Set", "args": ["50"]}
+ * @response 200 Command result.
+ * @response 500 The command errored or timed out.
+ */
+
+/**
+ * Run a named command, passing its arguments as a JSON array in the body.
+ *
+ * @route POST /api/command/{command}
+ * @body ["arg1", "arg2"]
+ * @response 200 Command result.
+ * @response 500 The command errored or timed out.
+ */
 HttpResponsePtr CommandManager::render_POST(const HttpRequestPtr& req) {
     auto parts = getPathPieces(req->path());
     std::string p1 = parts[0];

@@ -433,7 +433,7 @@ int BBBMatrix::Init(Json::Value config) {
     m_handler = PanelInterleaveHandler::createHandler(m_panelInterleave, m_panelWidth, m_panelHeight, m_panelScan);
     if (!m_handler) {
         LogErr(VB_CHANNELOUT, "BBBMatrix: Unable to create PanelInterleaveHandler for %s\n", m_panelInterleave.c_str());
-        WarningHolder::AddWarning("BBBMatrix: Unable to create PanelInterleaveHandler for " + m_panelInterleave);
+        WarningHolder::AddWarning(50, "LED panel output: unable to create panel interleave handler for " + m_panelInterleave);
         return 0;
     }
     m_channelCount = m_width * m_height * 3;
@@ -494,13 +494,13 @@ int BBBMatrix::Init(Json::Value config) {
     bool isPWM = false;
     if (!FileExists(filename)) {
         LogErr(VB_CHANNELOUT, "No output pin configuration for %s - %s\n", name.c_str(), filename);
-        WarningHolder::AddWarning("BBBMatrix: No output pin configuration for " + name);
+        WarningHolder::AddWarning(50, "LED panel output: no output pin configuration for " + name);
         return 0;
     } else {
         LogDebug(VB_CHANNELOUT, "Using panel pinout from %s\n", filename);
         if (!LoadJsonFromFile(filename, root)) {
             LogErr(VB_CHANNELOUT, "Could not read pin configuration for %s - %s\n", name.c_str(), filename);
-            WarningHolder::AddWarning("BBBMatrix: Could not read pin configuration for " + name);
+            WarningHolder::AddWarning(50, "LED panel output: could not read pin configuration for " + name);
             return 0;
         }
         std::string longName = root["longName"].asString();
@@ -643,13 +643,13 @@ int BBBMatrix::Init(Json::Value config) {
     if (!m_singlePRU) {
         if (!m_pruCopy->run("/tmp/FalconMatrixPRUCpy.out")) {
             LogErr(VB_CHANNELOUT, "BBBMatrix: Unable to start PRU. May require a reboot.\n");
-            WarningHolder::AddWarning("BBBMatrix: Unable to start PRU. May require a reboot.");
+            WarningHolder::AddWarning(20, "BBBMatrix: Unable to start PRU. May require a reboot.");
             return 0;
         }
     }
     if (!m_pru->run(pru_program)) {
         LogErr(VB_CHANNELOUT, "BBBMatrix: Unable to start PRU. May require a reboot.\n");
-        WarningHolder::AddWarning("BBBMatrix: Unable to start PRU. May require a reboot.");
+        WarningHolder::AddWarning(20, "BBBMatrix: Unable to start PRU. May require a reboot.");
         return 0;
     }
 
@@ -845,7 +845,7 @@ void BBBMatrix::OverlayTestData(unsigned char* channelData, int cycleNum, float 
         for (int i = 0; i < panelsOnOutput; i++) {
             int panel = m_panelMatrix->m_outputPanels[output][i];
 
-            m_panelMatrix->m_panels[panel].drawTestPattern(channelData + m_startChannel, cycleNum, testType);
+            m_panelMatrix->m_panels[panel].drawTestPattern(channelData + m_startChannel, cycleNum, percentOfCycle, testType);
         }
     }
 }

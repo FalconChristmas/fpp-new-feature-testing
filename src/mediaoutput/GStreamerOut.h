@@ -21,6 +21,7 @@
 #include <array>
 #include <atomic>
 #include <list>
+#include <memory>
 #include <mutex>
 #include <vector>
 
@@ -71,6 +72,13 @@ public:
     // Returns -1 if not found.  Requires the shared DRM fd.
     static int FindPrimaryPlaneForConnector(int drmFd, int connectorId);
 
+    // Return a plane previously handed out by FindPrimaryPlaneForConnector to
+    // the free pool so it can be reused.  Must be called when the kmssink that
+    // owned the plane is torn down, otherwise the allocated-plane set grows
+    // until no overlay planes remain and HDMI video silently stops working.
+    // A negative id or an id that was never allocated is ignored.
+    static void ReleasePlane(int planeId);
+
     // GStreamer-specific
     void SetLoopCount(int loops) { m_loopCount = loops; }
     void SetVolumeAdjustment(int volAdj);
@@ -92,6 +100,12 @@ private:
     int m_volumeAdjust = 0;
     std::atomic<bool> m_playing{false};     // written from GStreamer thread (BusSyncHandler), read from main loop
     std::atomic<bool> m_shutdownFlag{false};  // guards callbacks during teardown
+    // Cancellation token for the detached Start() PLAYING-transition thread.
+    // Shared (shared_ptr) so the thread can safely outlive this object: Stop()
+    // sets it to abort the volume ramp / deferred attach early, and the thread
+    // captures only this token (never `this`), eliminating use-after-free if it
+    // is still running when the object is torn down.
+    std::shared_ptr<std::atomic<bool>> m_startThreadCancel;
     gulong m_appsinkSignalId = 0;            // audio appsink signal handler ID
     gulong m_videoAppsinkSignalId = 0;       // video appsink signal handler ID
 
@@ -136,6 +150,7 @@ private:
     GstElement* m_kmssink = nullptr;       // kmssink element (owned by pipeline bin)
     int m_hdmiConnectorId = -1;            // DRM connector ID from sysfs
     std::string m_hdmiCardPath;            // e.g. "/dev/dri/card1"
+    std::vector<int> m_allocatedPlanes;    // overlay planes reserved for this pipeline's kmssinks; released in Close()
     int m_hdmiDisplayWidth = 0;            // display resolution
     int m_hdmiDisplayHeight = 0;
 

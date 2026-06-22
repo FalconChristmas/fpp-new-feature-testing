@@ -63,8 +63,7 @@ int FBMatrixOutput::Init(Json::Value config) {
     if (config.isMember("modelName"))
         modelName = config["modelName"].asString();
 
-    printf("FBMatrix::Init: modelName='%s', empty=%d\n", modelName.c_str(), modelName == "");
-    fflush(stdout);
+    LogDebug(VB_CHANNELOUT, "FBMatrix::Init: modelName='%s', empty=%d\n", modelName.c_str(), modelName == "");
 
     if (modelName == "") {
         int width = 0;
@@ -82,14 +81,12 @@ int FBMatrixOutput::Init(Json::Value config) {
             modelName = "FB - ";
             modelName += device;
 
-            printf("FBMatrix: Checking for existing model '%s', hasModel=%d\n", 
-                   modelName.c_str(), PixelOverlayManager::INSTANCE.getModel(modelName) != nullptr);
-            fflush(stdout);
+            LogDebug(VB_CHANNELOUT, "FBMatrix: Checking for existing model '%s', hasModel=%d\n",
+                     modelName.c_str(), PixelOverlayManager::INSTANCE.getModel(modelName) != nullptr);
 
             // Delete existing model if it exists, so we can recreate with PixelSize
             if (PixelOverlayManager::INSTANCE.getModel(modelName)) {
-                printf("FBMatrix: Removing existing model '%s' to recreate with PixelSize\n", modelName.c_str());
-                fflush(stdout);
+                LogDebug(VB_CHANNELOUT, "FBMatrix: Removing existing model '%s' to recreate with PixelSize\n", modelName.c_str());
                 PixelOverlayManager::INSTANCE.removeAutoOverlayModel(modelName);
             }
 
@@ -106,23 +103,21 @@ int FBMatrixOutput::Init(Json::Value config) {
                 if (config.isMember("pixelSize")) {
                     int ps = config["pixelSize"].asInt();
                     val["PixelSize"] = ps;
-                    printf("FBMatrix: Setting PixelSize=%d for model '%s'\n", ps, modelName.c_str());
-                    fflush(stdout);
+                    LogDebug(VB_CHANNELOUT, "FBMatrix: Setting PixelSize=%d for model '%s'\n", ps, modelName.c_str());
                 } else {
-                    printf("FBMatrix: No pixelSize in config for model '%s'\n", modelName.c_str());
-                    fflush(stdout);
+                    LogDebug(VB_CHANNELOUT, "FBMatrix: No pixelSize in config for model '%s'\n", modelName.c_str());
                 }
 
                 PixelOverlayManager::INSTANCE.addModel(val);
                 m_autoCreatedFBModelName = modelName;
             } else {
                 LogErr(VB_CHANNELOUT, "Empty Pixel Overlay Model name\n");
-                WarningHolder::AddWarning("VirtualMatrix: Empty Pixel Overlay Model name");
+                WarningHolder::AddWarning(35, "VirtualMatrix: Empty Pixel Overlay Model name");
                 return 0;
             }
         } else {
             LogErr(VB_CHANNELOUT, "Empty Pixel Overlay Model name\n");
-            WarningHolder::AddWarning("VirtualMatrix: Empty Pixel Overlay Model name");
+            WarningHolder::AddWarning(35, "VirtualMatrix: Empty Pixel Overlay Model name");
             return 0;
         }
     }
@@ -131,7 +126,7 @@ int FBMatrixOutput::Init(Json::Value config) {
 
     if (!model) {
         LogErr(VB_CHANNELOUT, "Invalid Pixel Overlay Model: '%s'\n", modelName.c_str());
-        WarningHolder::AddWarning("VirtualMatrix: Invalid Pixel Overlay Model: " + modelName);
+        WarningHolder::AddWarning(35, "VirtualMatrix: Invalid Pixel Overlay Model: " + modelName);
         return 0;
     }
 
@@ -142,10 +137,11 @@ int FBMatrixOutput::Init(Json::Value config) {
     m_channelCount = width * height * 3;
 
     inverted = config["invert"].asInt();
+    flipHorizontal = config["flipHorizontal"].asInt();
 
     if (m_channelCount != (width * height * 3)) {
         LogErr(VB_CHANNELOUT, "Error, channel count is incorrect\n");
-        WarningHolder::AddWarning("VirtualMatrix: Invalid Pixel Overlay Model: " + modelName);
+        WarningHolder::AddWarning(35, "VirtualMatrix: Invalid Pixel Overlay Model: " + modelName);
         return 0;
     }
 
@@ -192,20 +188,26 @@ void FBMatrixOutput::PrepData(unsigned char* channelData) {
               channelData);
 
     int stride = width * 3;
-    int drow = inverted ? height - 1 : 0;
-    unsigned char* src = channelData;
-    unsigned char* dst = buffer;
 
-    if (inverted) {
-        dst = (unsigned char*)buffer + (stride * (height - 1));
-    }
     for (int y = 0; y < height; y++) {
-        memcpy(dst, src, stride);
-        src += stride;
-        if (inverted) {
-            dst -= stride;
+        unsigned char* src = channelData + (y * stride);
+        // Vertical flip: write source row y into the mirrored destination row
+        int dstRow = inverted ? (height - 1 - y) : y;
+        unsigned char* dst = buffer + (dstRow * stride);
+
+        if (flipHorizontal) {
+            // Horizontal flip: reverse the pixel order within the row
+            unsigned char* sp = src;
+            unsigned char* dp = dst + ((width - 1) * 3);
+            for (int x = 0; x < width; x++) {
+                dp[0] = sp[0];
+                dp[1] = sp[1];
+                dp[2] = sp[2];
+                sp += 3;
+                dp -= 3;
+            }
         } else {
-            dst += stride;
+            memcpy(dst, src, stride);
         }
     }
 }
@@ -239,4 +241,6 @@ void FBMatrixOutput::DumpConfig(void) {
     LogDebug(VB_CHANNELOUT, "    model  : %s\n", modelName.c_str());
     LogDebug(VB_CHANNELOUT, "    width  : %d\n", width);
     LogDebug(VB_CHANNELOUT, "    height : %d\n", height);
+    LogDebug(VB_CHANNELOUT, "    flipV  : %d\n", inverted);
+    LogDebug(VB_CHANNELOUT, "    flipH  : %d\n", flipHorizontal);
 }

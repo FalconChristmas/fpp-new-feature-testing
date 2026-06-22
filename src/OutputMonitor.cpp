@@ -423,11 +423,11 @@ void OutputMonitor::checkPixelCounts(const std::string& portList, const std::str
                 }
                 if (action == "Warn" && newWarn != p->receivers[x].warning) {
                     if (!p->receivers[x].warning.empty()) {
-                        WarningHolder::RemoveWarning(p->receivers[x].warning);
+                        WarningHolder::RemoveWarning(16, p->receivers[x].warning);
                     }
                     p->receivers[x].warning = newWarn;
                     if (!p->receivers[x].warning.empty()) {
-                        WarningHolder::AddWarning(p->receivers[x].warning);
+                        WarningHolder::AddWarning(16, p->receivers[x].warning);
                     }
                 } else if (action == "Log") {
                     LogInfo(VB_CHANNELOUT, "%s\n", newWarn.c_str());
@@ -604,7 +604,7 @@ void OutputMonitor::AddPortConfiguration(int port, const Json::Value& pinConfig,
             pi->eFuseInterruptPin = PinCapabilities::getPinByName(eFuseInterruptPin).ptr();
             if (!pi->eFuseInterruptPin) {
                 LogWarn(VB_CHANNELOUT, "Could not find pin " + eFuseInterruptPin + " to handle fuse interrupts for output " + name + "\n");
-                WarningHolder::AddWarning("Could not find pin " + eFuseInterruptPin + " to handle fuse interrupts for output " + name);
+                WarningHolder::AddWarning(51, "Could not find pin " + eFuseInterruptPin + " to handle fuse interrupts for output " + name);
             } else {
                 hasInfo = true;
                 if (fusePins[eFuseInterruptPin] == nullptr) {
@@ -654,7 +654,7 @@ void OutputMonitor::AddPortConfiguration(int port, const Json::Value& pinConfig,
         pi->eFuseOKValue = eFuseHigh ? 1 : 0;
         if (pi->eFusePin == nullptr) {
             LogWarn(VB_CHANNELOUT, "Could not find pin " + eFusePin + " to handle fuse for output " + name + "\n");
-            WarningHolder::AddWarning("Could not find pin " + eFusePin + " to handle fuse for output " + name);
+            WarningHolder::AddWarning(51, "Could not find pin " + eFusePin + " to handle fuse for output " + name);
         } else {
             pi->eFusePin->configPin("gpio" + postFix, false, "eFuse" + std::to_string(port + 1));
             if (pi->eFuseInterruptPin == nullptr) {
@@ -762,7 +762,7 @@ const PinCapabilities* OutputMonitor::AddOutputPin(const std::string& name, cons
     const PinCapabilities* pc = PinCapabilities::getPinByName(pin).ptr();
     if (!pc) {
         LogWarn(VB_CHANNELOUT, "Could not find pin " + pin + " to enable output " + name + "\n");
-        WarningHolder::AddWarning("Could not find pin " + pin + " to enable output " + name);
+        WarningHolder::AddWarning(51, "Could not find pin " + pin + " to enable output " + name);
         return nullptr;
     }
     std::unique_lock<std::mutex> lock(gpioLock);
@@ -849,7 +849,7 @@ void OutputMonitor::addEFuseWarning(PortPinInfo* pi, int rec) {
 
             LogWarn(VB_CHANNELOUT, warn + "\n");
             // Output SHOULD be on, but the fuse triggered.  That's a warning.
-            WarningHolder::AddWarning(warn);
+            WarningHolder::AddWarning(16, warn);
             pi->receivers[rec].warning = warn;
 
             std::map<std::string, std::string> keywords;
@@ -863,7 +863,7 @@ void OutputMonitor::addEFuseWarning(PortPinInfo* pi, int rec) {
 void OutputMonitor::clearEFuseWarning(PortPinInfo* port, int rec) {
     if (port && rec < 6) {
         if (!port->receivers[rec].warning.empty()) {
-            WarningHolder::RemoveWarning(port->receivers[rec].warning);
+            WarningHolder::RemoveWarning(16, port->receivers[rec].warning);
             port->receivers[rec].warning.clear();
         }
         port->receivers[rec].retryCount = 0;
@@ -943,6 +943,41 @@ void OutputMonitor::setSmartReceiverInfo(int port, int index, bool enabled, bool
     }
 }
 
+// --------------------------------------------------------------------------
+// OpenAPI docs for the /fppd/ports/* endpoints handled below.
+// --------------------------------------------------------------------------
+
+/**
+ * Get the current status of every output port (current draw, smart-receiver
+ * data, sensor readings, etc.).
+ *
+ * @route GET /api/fppd/ports
+ * @response 200 Array of port status objects.
+ */
+
+/**
+ * List the names of all configured output ports.
+ *
+ * @route GET /api/fppd/ports/list
+ * @response 200 Array of port names (first entry is "--ALL--").
+ * ```json
+ * ["--ALL--", "Port 1", "Port 2"]
+ * ```
+ */
+
+/**
+ * Start a pixel-count test on all ports, then return current port status.
+ *
+ * @route GET /api/fppd/ports/pixelCount
+ * @response 200 Array of port status objects.
+ */
+
+/**
+ * Stop any running port test, then return current port status.
+ *
+ * @route GET /api/fppd/ports/stop
+ * @response 200 Array of port status objects.
+ */
 HttpResponsePtr OutputMonitor::render_GET(const HttpRequestPtr& req) {
     auto parts = getPathPieces(req->path());
     int plen = parts.size();

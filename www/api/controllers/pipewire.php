@@ -130,7 +130,7 @@ function SavePipeWireAudioGroups()
 /////////////////////////////////////////////////////////////////////////////
 // POST /api/pipewire/audio/groups/apply
 // Generates PipeWire config files and restarts PipeWire services
-function ApplyPipeWireAudioGroups($overrideData = null)
+function ApplyPipeWireAudioGroups($overrideData = null, $skipRestart = false)
 {
     global $settings, $SUDO;
 
@@ -157,11 +157,13 @@ function ApplyPipeWireAudioGroups($overrideData = null)
             unlink($cachedConf);
         }
         // Restart PipeWire to pick up removal (order matters — pulse depends on pipewire socket)
-        exec($SUDO . " /usr/bin/systemctl restart fpp-pipewire.service 2>&1");
-        usleep(500000);
-        exec($SUDO . " /usr/bin/systemctl restart fpp-wireplumber.service 2>&1");
-        usleep(500000);
-        exec($SUDO . " /usr/bin/systemctl restart fpp-pipewire-pulse.service 2>&1");
+        if (!$skipRestart) {
+            exec($SUDO . " /usr/bin/systemctl restart fpp-pipewire.service 2>&1");
+            usleep(500000);
+            exec($SUDO . " /usr/bin/systemctl restart fpp-wireplumber.service 2>&1");
+            usleep(500000);
+            exec($SUDO . " /usr/bin/systemctl restart fpp-pipewire-pulse.service 2>&1");
+        }
         return json(array("status" => "OK", "message" => "Audio groups cleared, PipeWire restarted"));
     }
 
@@ -247,6 +249,34 @@ function ApplyPipeWireAudioGroups($overrideData = null)
     // sink (e.g. Sound Blaster) in addition to their intended filter-chain
     // targets, causing doubled audio.
     InstallWirePlumberFppLinkingHook($SUDO);
+
+    // When called with $skipRestart=true (e.g. from a MediaBackend mode switch),
+    // config files are already written; the caller backgrounds the service restarts
+    // so the HTTP response returns immediately.  Write PipeWireSinkName to file
+    // now so it is correct on the next fppd start — even before the restarted
+    // PipeWire graph is up and SetFppdSetting can be called.
+    if ($skipRestart) {
+        if ($useOverride) {
+            // Simple mode: no input groups, route directly to the first enabled output group.
+            $simpleActiveGroup = isset($data['activeGroup']) ? $data['activeGroup'] : '';
+            if (empty($simpleActiveGroup)) {
+                foreach ($data['groups'] as $grp) {
+                    if (isset($grp['enabled']) && $grp['enabled'] && !empty($grp['members'])) {
+                        $simpleActiveGroup = "fpp_group_" . preg_replace('/[^a-zA-Z0-9_]/', '_', strtolower($grp['name']));
+                        break;
+                    }
+                }
+            }
+            if (!empty($simpleActiveGroup)) {
+                WriteSettingToFile('PipeWireSinkName', $simpleActiveGroup);
+            }
+            // Clear any stale per-slot sink names from advanced mode.
+            for ($s = 2; $s <= 5; $s++) {
+                WriteSettingToFile("PipeWireSinkName_$s", '');
+            }
+        }
+        return;
+    }
 
     // Stop fppd playback before restarting PipeWire to avoid race conditions
     // where WirePlumber creates rogue links to orphaned streams during the
@@ -895,6 +925,52 @@ function GetPipeWireAudioCards()
         }
     }
 
+    // --- Also include Opus RTP virtual sinks as selectable cards ---
+    $opusFile = $settings['mediaDirectory'] . "/config/pipewire-opus-rtp-instances.json";
+    if (file_exists($opusFile)) {
+        $opusData = json_decode(file_get_contents($opusFile), true);
+        if ($opusData && isset($opusData['instances']) && is_array($opusData['instances'])) {
+            foreach ($opusData['instances'] as $inst) {
+                if (!isset($inst['enabled']) || !$inst['enabled'])
+                    continue;
+                $mode = isset($inst['mode']) ? $inst['mode'] : 'send';
+                if ($mode !== 'send' && $mode !== 'both')
+                    continue;
+
+                $nodeSafeName = 'opusrtp_' . preg_replace('/[^a-zA-Z0-9_]/', '_', strtolower($inst['name']));
+                $sinkNodeName = $nodeSafeName . '_send';
+                $instChannels = isset($inst['channels']) ? intval($inst['channels']) : 2;
+
+                $pwNodeName = '';
+                $sinkSearch = array();
+                exec($SUDO . " " . $pwEnv . " pactl list sinks short 2>/dev/null | grep " . escapeshellarg($sinkNodeName), $sinkSearch);
+                if (!empty($sinkSearch)) {
+                    $sp = preg_split('/\s+/', trim($sinkSearch[0]));
+                    if (count($sp) >= 2)
+                        $pwNodeName = $sp[1];
+                }
+
+                $cards[] = array(
+                    "cardNum" => -1,
+                    "cardId" => 'opusrtp_' . $inst['id'],
+                    "cardName" => $inst['name'] . ' (Opus RTP Send)',
+                    "device" => 0,
+                    "deviceName" => "Opus RTP Sink",
+                    "channels" => $instChannels,
+                    "mixerControls" => array(),
+                    "alsaPath" => "",
+                    "byPath" => "",
+                    "byId" => "",
+                    "pwNodeName" => !empty($pwNodeName) ? $pwNodeName : $sinkNodeName,
+                    "isOpusRTP" => true,
+                    "opusrtpInstanceId" => $inst['id'],
+                    "destIP" => isset($inst['destIP']) ? $inst['destIP'] : '',
+                    "port" => isset($inst['port']) ? $inst['port'] : 5005
+                );
+            }
+        }
+    }
+
     return json($cards);
 }
 
@@ -1235,180 +1311,25 @@ function FindFXFilterChainNodeId($groupId, $cardId)
 // may link filter-chain outputs back to the combine sink, creating loops.
 function InstallWirePlumberFppLinkingHook($SUDO)
 {
-    $luaScript = <<<'LUA'
--- FPP: Block default target fallback for combine-stream and filter-chain nodes
---
--- Problem: When WirePlumber cannot find the defined target for a node,
--- find-default-target links it to the default sink. This causes:
---   1. Filter-chain outputs link back to the combine sink, creating a
---      link-group loop that prevents combine-output -> filter-chain links.
---   2. Combine outputs get rogue links to the default ALSA sink (doubled audio).
---
--- Solution: Block the default-target fallback for FPP nodes that have an
--- explicit target set. On rescan (when the target appears), find-defined-target
--- will succeed and create the correct link.
-
-lutils = require ("linking-utils")
-log = Log.open_topic ("s-fpp-linking")
-
-SimpleEventHook {
-  name = "linking/fpp-block-combine-fallback",
-  after = { "linking/find-defined-target", "linking/find-filter-target" },
-  before = { "linking/find-default-target", "linking/find-best-target" },
-  interests = {
-    EventInterest {
-      Constraint { "event.type", "=", "select-target" },
-    },
-  },
-  execute = function (event)
-    local source, om, si, si_props, si_flags, target =
-        lutils:unwrap_select_target_event (event)
-
-    -- If a target was already found, let it proceed normally
-    if target then
-      return
-    end
-
-    local node_name = si_props ["node.name"] or ""
-    local has_target = si_props ["node.target"] ~= nil or
-                       si_props ["target.object"] ~= nil
-
-    -- Block default fallback for FPP output group combine-stream outputs
-    if node_name:match ("^output%.fpp_group_") then
-      log:info (si, "... FPP combine output: blocking default fallback for "
-          .. node_name .. ", will retry on rescan")
-      event:stop_processing ()
-      return
-    end
-
-    -- Block default fallback for FPP input group combine-stream outputs
-    if node_name:match ("^output%.fpp_input_") then
-      log:info (si, "... FPP input group output: blocking default fallback for "
-          .. node_name .. ", will retry on rescan")
-      event:stop_processing ()
-      return
-    end
-
-    -- Block default fallback for FPP routing hub combine-stream outputs (post-effects)
-    if node_name:match ("^output%.fpp_route_ig_") then
-      log:info (si, "... FPP routing hub output: blocking default fallback for "
-          .. node_name .. ", will retry on rescan")
-      event:stop_processing ()
-      return
-    end
-
-    -- Block default fallback for FPP filter-chain outputs with explicit target
-    -- (prevents linking back to combine sink when target isn't ready yet)
-    if node_name:match ("^fpp_fx_g%d+_.*_out$") and has_target then
-      log:info (si, "... FPP filter-chain output: blocking default fallback for "
-          .. node_name .. ", target: " .. tostring (si_props ["node.target"])
-          .. ", will retry on rescan")
-      event:stop_processing ()
-      return
-    end
-
-    -- Block default fallback for FPP input group filter-chain outputs with explicit target
-    if node_name:match ("^fpp_fx_ig_%d+_out$") and has_target then
-      log:info (si, "... FPP input group EQ output: blocking default fallback for "
-          .. node_name .. ", target: " .. tostring (si_props ["node.target"])
-          .. ", will retry on rescan")
-      event:stop_processing ()
-      return
-    end
-
-    -- Block default fallback for FPP input group loopback nodes with explicit target
-    -- (matches both bare and sub-node names: fpp_loopback_ig1_*, input.fpp_loopback_ig1_*, output.fpp_loopback_ig1_*)
-    if (node_name:match ("^fpp_loopback_ig%d+_") or node_name:match ("^[io][nu]%a+%.fpp_loopback_ig%d+_")) and has_target then
-      log:info (si, "... FPP input loopback: blocking default fallback for "
-          .. node_name .. ", will retry on rescan")
-      event:stop_processing ()
-      return
-    end
-
-    -- Block default fallback for FPP tee (null-sink fan-out) nodes
-    if node_name:match ("^fpp_tee_fppd_stream_") then
-      log:info (si, "... FPP tee node: blocking default fallback for "
-          .. node_name .. ", will retry on rescan")
-      event:stop_processing ()
-      return
-    end
-
-    -- Block default fallback for fppd stream nodes with explicit target
-    -- (prevents routing to wrong default sink when input group isn't ready)
-    if node_name:match ("^fppd_stream_%d+") and has_target then
-      log:info (si, "... FPP media stream: blocking default fallback for "
-          .. node_name .. ", will retry on rescan")
-      event:stop_processing ()
-      return
-    end
-
-    -- Block default fallback for FPP video stream nodes with explicit target
-    -- (video routed through PipeWire to video output groups)
-    if node_name:match ("^fppd_video_stream_%d+") and has_target then
-      log:info (si, "... FPP video stream: blocking default fallback for "
-          .. node_name .. ", will retry on rescan")
-      event:stop_processing ()
-      return
-    end
-
-    -- Block default fallback for FPP video output consumer nodes with explicit target
-    if node_name:match ("^fpp_video_out_") and has_target then
-      log:info (si, "... FPP video output: blocking default fallback for "
-          .. node_name .. ", will retry on rescan")
-      event:stop_processing ()
-      return
-    end
-
-    -- Block default fallback for FPP video group combine-stream outputs
-    if node_name:match ("^output%.fpp_video_group_") then
-      log:info (si, "... FPP video group output: blocking default fallback for "
-          .. node_name .. ", will retry on rescan")
-      event:stop_processing ()
-      return
-    end
-
-    -- (Routing loopback nodes removed — combine-stream handles output routing)
-  end
-}:register ()
-LUA;
-
-    $wpConfContent = <<<'WPCONF'
-# FPP: Block default target fallback for combine-stream outputs
-# Prevents WirePlumber from creating rogue links from combine-stream
-# output nodes to the default sink when the defined target isn't found
-# as a SiLinkable. The combine-stream module creates correct internal
-# links via the node.target property.
-
-wireplumber.components = [
-  {
-    name = linking/fpp-block-combine-fallback.lua, type = script/lua
-    provides = hooks.linking.target.fpp-block-combine-fallback
-  }
-]
-
-wireplumber.profiles = {
-  main = {
-    hooks.linking.target.fpp-block-combine-fallback = required
-  }
-}
-WPCONF;
-
-    // Write Lua script to WirePlumber scripts directory
+    // The hook is shipped as static files in the repo (/opt/fpp/etc) and copied
+    // into place at image build; this just (re)deploys them into WirePlumber's
+    // search paths. Kept in sync with FPPINIT's C++ boot path
+    // (ensureWirePlumberLinkingHook), which installs the same files at boot.
+    $luaSrc = "/opt/fpp/etc/wireplumber/scripts/linking/fpp-block-combine-fallback.lua";
     $luaPath = "/usr/share/wireplumber/scripts/linking/fpp-block-combine-fallback.lua";
-    $tmpFile = tempnam(sys_get_temp_dir(), 'fpp_wp_');
-    file_put_contents($tmpFile, $luaScript);
-    exec($SUDO . " cp " . escapeshellarg($tmpFile) . " " . escapeshellarg($luaPath));
-    exec($SUDO . " chmod 644 " . escapeshellarg($luaPath));
-    unlink($tmpFile);
+    if (file_exists($luaSrc)) {
+        exec($SUDO . " /bin/mkdir -p /usr/share/wireplumber/scripts/linking");
+        exec($SUDO . " cp " . escapeshellarg($luaSrc) . " " . escapeshellarg($luaPath));
+        exec($SUDO . " chmod 644 " . escapeshellarg($luaPath));
+    }
 
-    // Write WirePlumber component config
+    $confSrc = "/opt/fpp/etc/wireplumber/wireplumber.conf.d/60-fpp-block-combine-fallback.conf";
     $wpConfPath = "/etc/wireplumber/wireplumber.conf.d/60-fpp-block-combine-fallback.conf";
-    exec($SUDO . " /bin/mkdir -p /etc/wireplumber/wireplumber.conf.d");
-    $tmpFile = tempnam(sys_get_temp_dir(), 'fpp_wp_');
-    file_put_contents($tmpFile, $wpConfContent);
-    exec($SUDO . " cp " . escapeshellarg($tmpFile) . " " . escapeshellarg($wpConfPath));
-    exec($SUDO . " chmod 644 " . escapeshellarg($wpConfPath));
-    unlink($tmpFile);
+    if (file_exists($confSrc)) {
+        exec($SUDO . " /bin/mkdir -p /etc/wireplumber/wireplumber.conf.d");
+        exec($SUDO . " cp " . escapeshellarg($confSrc) . " " . escapeshellarg($wpConfPath));
+        exec($SUDO . " chmod 644 " . escapeshellarg($wpConfPath));
+    }
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -1483,7 +1404,7 @@ function SavePipeWireInputGroups()
 /////////////////////////////////////////////////////////////////////////////
 // POST /api/pipewire/audio/input-groups/apply
 // Generates PipeWire input group config and restarts PipeWire services
-function ApplyPipeWireInputGroups()
+function ApplyPipeWireInputGroups($skipRestart = false)
 {
     global $settings, $SUDO;
 
@@ -1500,11 +1421,13 @@ function ApplyPipeWireInputGroups()
             unlink($cachedConf);
         }
         // Restart PipeWire
-        exec($SUDO . " /usr/bin/systemctl restart fpp-pipewire.service 2>&1");
-        usleep(500000);
-        exec($SUDO . " /usr/bin/systemctl restart fpp-wireplumber.service 2>&1");
-        usleep(500000);
-        exec($SUDO . " /usr/bin/systemctl restart fpp-pipewire-pulse.service 2>&1");
+        if (!$skipRestart) {
+            exec($SUDO . " /usr/bin/systemctl restart fpp-pipewire.service 2>&1");
+            usleep(500000);
+            exec($SUDO . " /usr/bin/systemctl restart fpp-wireplumber.service 2>&1");
+            usleep(500000);
+            exec($SUDO . " /usr/bin/systemctl restart fpp-pipewire-pulse.service 2>&1");
+        }
         return json(array("status" => "OK", "message" => "Input groups cleared, PipeWire restarted"));
     }
 
@@ -1517,11 +1440,13 @@ function ApplyPipeWireInputGroups()
         if (file_exists($cachedConf)) {
             unlink($cachedConf);
         }
-        exec($SUDO . " /usr/bin/systemctl restart fpp-pipewire.service 2>&1");
-        usleep(500000);
-        exec($SUDO . " /usr/bin/systemctl restart fpp-wireplumber.service 2>&1");
-        usleep(500000);
-        exec($SUDO . " /usr/bin/systemctl restart fpp-pipewire-pulse.service 2>&1");
+        if (!$skipRestart) {
+            exec($SUDO . " /usr/bin/systemctl restart fpp-pipewire.service 2>&1");
+            usleep(500000);
+            exec($SUDO . " /usr/bin/systemctl restart fpp-wireplumber.service 2>&1");
+            usleep(500000);
+            exec($SUDO . " /usr/bin/systemctl restart fpp-pipewire-pulse.service 2>&1");
+        }
         return json(array("status" => "OK", "message" => "Input groups cleared, PipeWire restarted"));
     }
 
@@ -1616,20 +1541,22 @@ function ApplyPipeWireInputGroups()
         }
     }
 
-    // Restart PipeWire services
-    exec($SUDO . " /usr/bin/systemctl restart fpp-pipewire.service 2>&1");
-    usleep(500000);
-    exec($SUDO . " /usr/bin/systemctl restart fpp-wireplumber.service 2>&1");
-    for ($i = 0; $i < 10; $i++) {
-        if (file_exists('/run/pipewire-fpp/pipewire-0'))
-            break;
-        usleep(250000);
-    }
-    exec($SUDO . " /usr/bin/systemctl restart fpp-pipewire-pulse.service 2>&1");
-    for ($i = 0; $i < 10; $i++) {
-        if (file_exists('/run/pipewire-fpp/pulse/native'))
-            break;
-        usleep(250000);
+    // Restart PipeWire services (skipped when $skipRestart=true — caller backgrounds it)
+    if (!$skipRestart) {
+        exec($SUDO . " /usr/bin/systemctl restart fpp-pipewire.service 2>&1");
+        usleep(500000);
+        exec($SUDO . " /usr/bin/systemctl restart fpp-wireplumber.service 2>&1");
+        for ($i = 0; $i < 10; $i++) {
+            if (file_exists('/run/pipewire-fpp/pipewire-0'))
+                break;
+            usleep(250000);
+        }
+        exec($SUDO . " /usr/bin/systemctl restart fpp-pipewire-pulse.service 2>&1");
+        for ($i = 0; $i < 10; $i++) {
+            if (file_exists('/run/pipewire-fpp/pulse/native'))
+                break;
+            usleep(250000);
+        }
     }
 
     // Set PipeWire default sink and push setting to fppd (best-effort)
@@ -3087,6 +3014,7 @@ function ResolveAlsaCaptureNodeName($cardId)
 // Helper: Generate PipeWire input group config (combine-stream + loopback)
 function GeneratePipeWireInputGroupsConfig($inputGroups, $outputGroups)
 {
+    global $settings;
     $channelPositions = array(
         1 => "[ MONO ]",
         2 => "[ FL FR ]",
@@ -3211,7 +3139,8 @@ function GeneratePipeWireInputGroupsConfig($inputGroups, $outputGroups)
                         'name' => $outNodeName,
                         'desc' => $ogName,
                         'volume' => $pathVolume,
-                        'ogId' => intval($outGroupId)
+                        'ogId' => intval($outGroupId),
+                        'channels' => isset($og['channels']) ? intval($og['channels']) : 2
                     );
                     break;
                 }
@@ -3231,10 +3160,12 @@ function GeneratePipeWireInputGroupsConfig($inputGroups, $outputGroups)
         $numCh = min($groupChannels, count($channelLabels));
 
         // Helper: generate stream.rules block for output groups with per-path volume
-        $generateOutputRules = function ($rules) use (&$conf) {
+        $generateOutputRules = function ($rules) use (&$conf, $channelPositions) {
             $conf .= "      stream.rules = [\n";
             foreach ($rules as $rule) {
                 $volLinear = round($rule['volume'] / 100.0, 3);
+                $outCh = isset($rule['channels']) ? intval($rule['channels']) : 2;
+                $outPos = isset($channelPositions[$outCh]) ? $channelPositions[$outCh] : "[ FL FR ]";
                 $conf .= "        { matches = [\n";
                 $conf .= "            { media.class = \"Audio/Sink\"\n";
                 $conf .= "              node.name = \"" . $rule['name'] . "\"\n";
@@ -3243,6 +3174,8 @@ function GeneratePipeWireInputGroupsConfig($inputGroups, $outputGroups)
                 $conf .= "          actions = {\n";
                 $conf .= "            create-stream = {\n";
                 $conf .= "              node.target = \"" . $rule['name'] . "\"\n";
+                $conf .= "              combine.audio.position = $outPos\n";
+                $conf .= "              audio.position = $outPos\n";
                 if ($volLinear < 0.999) {
                     $conf .= "              channelmix.volume = $volLinear\n";
                 }
@@ -3319,6 +3252,7 @@ function GeneratePipeWireInputGroupsConfig($inputGroups, $outputGroups)
             $conf .= "        media.class = Audio/Sink\n";
             $conf .= "        audio.channels = $numCh\n";
             $conf .= "        audio.position = $groupPos\n";
+            $conf .= "";
             $conf .= "      }\n";
             $conf .= "      playback.props = {\n";
             $conf .= "        node.name = \"$fxOutName\"\n";
@@ -3327,6 +3261,7 @@ function GeneratePipeWireInputGroupsConfig($inputGroups, $outputGroups)
             $conf .= "        stream.dont-remix = true\n";
             $conf .= "        audio.channels = $numCh\n";
             $conf .= "        audio.position = $groupPos\n";
+            $conf .= "";
             $conf .= "      }\n";
 
             $conf .= "    }\n"; // args
@@ -3341,6 +3276,7 @@ function GeneratePipeWireInputGroupsConfig($inputGroups, $outputGroups)
             $conf .= "      node.description = \"$groupName (Routing)\"\n";
             $conf .= "      combine.props = {\n";
             $conf .= "        audio.position = $groupPos\n";
+            $conf .= "";
             $conf .= "      }\n";
             $conf .= "      stream.props = {\n";
             $conf .= "        stream.dont-remix = true\n";
@@ -3358,6 +3294,7 @@ function GeneratePipeWireInputGroupsConfig($inputGroups, $outputGroups)
             $conf .= "      node.description = \"$groupName\"\n";
             $conf .= "      combine.props = {\n";
             $conf .= "        audio.position = $groupPos\n";
+            $conf .= "";
             $conf .= "      }\n";
             $conf .= "      stream.props = {\n";
             $conf .= "        stream.dont-remix = true\n";
@@ -3389,6 +3326,7 @@ function GeneratePipeWireInputGroupsConfig($inputGroups, $outputGroups)
             $conf .= "      node.description = \"$groupName\"\n";
             $conf .= "      combine.props = {\n";
             $conf .= "        audio.position = $groupPos\n";
+            $conf .= "";
             $conf .= "      }\n";
             $conf .= "      stream.props = {\n";
             $conf .= "        stream.dont-remix = true\n";
@@ -3477,6 +3415,31 @@ function GeneratePipeWireInputGroupsConfig($inputGroups, $outputGroups)
                 if (empty($instanceId))
                     continue;
                 $sourceTarget = $instanceId;
+            } elseif ($mbrType === 'opus_rtp_receive') {
+                $opusInstId = isset($mbr['instanceId']) ? intval($mbr['instanceId']) : 0;
+                if ($opusInstId <= 0)
+                    continue;
+                // Resolve instance ID to PipeWire node name
+                $opusCfgFile = $settings['mediaDirectory'] . "/config/pipewire-opus-rtp-instances.json";
+                $sourceTarget = '';
+                if (file_exists($opusCfgFile)) {
+                    $opusCfg = json_decode(file_get_contents($opusCfgFile), true);
+                    if ($opusCfg && isset($opusCfg['instances'])) {
+                        foreach ($opusCfg['instances'] as $oi) {
+                            if (isset($oi['id']) && intval($oi['id']) === $opusInstId && !empty($oi['enabled'])) {
+                                $sourceTarget = 'opusrtp_' . preg_replace('/[^a-zA-Z0-9_]/', '_', strtolower($oi['name'])) . '_recv';
+                                if (empty($mbrName)) {
+                                    $mbrName = $oi['name'] . ' (Opus RTP)';
+                                    $loopbackName = "fpp_loopback_ig{$groupId}_" . preg_replace('/[^a-zA-Z0-9_]/', '_', strtolower($mbrName));
+                                    $loopbackDesc = "$mbrName → $groupName";
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (empty($sourceTarget))
+                    continue;
             } else {
                 continue;
             }
@@ -3597,7 +3560,7 @@ function GeneratePipeWireGroupsConfig($groups, $returnCardMap = false)
             $nodeName = isset($props['node.name']) ? $props['node.name'] : '';
             $mediaClass = isset($props['media.class']) ? $props['media.class'] : '';
             if ($nodeName && $mediaClass === 'Audio/Sink') {
-                $existingSinks[$nodeName] = true;
+                $existingSinks[$nodeName] = isset($props['audio.channels']) ? intval($props['audio.channels']) : 2;
                 $cn = -1;
 
                 // WirePlumber-managed sinks have alsa.card set directly.
@@ -3693,6 +3656,28 @@ function GeneratePipeWireGroupsConfig($groups, $returnCardMap = false)
                 continue;
             }
 
+            // Opus RTP virtual sinks: cardId starts with "opusrtp_"
+            if (strpos($cardId, 'opusrtp_') === 0) {
+                $opusFile = $settings['mediaDirectory'] . "/config/pipewire-opus-rtp-instances.json";
+                if (file_exists($opusFile)) {
+                    $opusJson = json_decode(file_get_contents($opusFile), true);
+                    if ($opusJson && isset($opusJson['instances'])) {
+                        $opusInstId = intval(str_replace('opusrtp_', '', $cardId));
+                        foreach ($opusJson['instances'] as $oi) {
+                            if (isset($oi['id']) && intval($oi['id']) === $opusInstId && isset($oi['enabled']) && $oi['enabled']) {
+                                $opusNodeName = 'opusrtp_' . preg_replace('/[^a-zA-Z0-9_]/', '_', strtolower($oi['name'])) . '_send';
+                                $cardNodeMap[$cardId] = $opusNodeName;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (!isset($cardNodeMap[$cardId])) {
+                    $unresolvedCards[] = $cardId . " (Opus RTP instance not found or disabled)";
+                }
+                continue;
+            }
+
             // Priority 1: Previously-stored nodeTarget from last successful Apply
             if (isset($member['nodeTarget']) && !empty($member['nodeTarget'])) {
                 $storedTarget = $member['nodeTarget'];
@@ -3748,6 +3733,27 @@ function GeneratePipeWireGroupsConfig($groups, $returnCardMap = false)
                 // Also verify card supports standard PCM formats (not IEC958/passthrough only)
                 $hasPcmFmt = (strpos($testOutput, 'S16_LE') !== false || strpos($testOutput, 'S24_LE') !== false
                     || strpos($testOutput, 'S24_3LE') !== false || strpos($testOutput, 'S32_LE') !== false);
+                // On some hardware (e.g. Pi Zero 2 W vc4-hdmi with KMS), the
+                // raw hw: device only exposes IEC958_SUBFRAME_LE.  PipeWire's
+                // SPA ALSA plugin fatally crashes when it encounters IEC958-only
+                // hw: devices because it tries to open a passthrough variant
+                // (appending "p" to the card name) which doesn't exist.  Using
+                // sysdefault: instead routes through ALSA's dmix/plug layer
+                // which handles the IEC958-to-PCM format conversion and avoids
+                // the passthrough probe crash.
+                $needsSysdefault = false;
+                if ($canOpen && !$hasPcmFmt
+                    && strpos($testOutput, 'IEC958_SUBFRAME_LE') !== false) {
+                    $sysOutput = shell_exec("timeout 2 aplay -D sysdefault:$cardId --dump-hw-params /dev/zero 2>&1");
+                    $sysCanOpen = (strpos($sysOutput, 'HW Params') !== false);
+                    $sysHasPcm = (strpos($sysOutput, 'S16_LE') !== false || strpos($sysOutput, 'S24_LE') !== false
+                        || strpos($sysOutput, 'S24_3LE') !== false || strpos($sysOutput, 'S32_LE') !== false);
+                    if ($sysCanOpen && $sysHasPcm) {
+                        $hasPcmFmt = true;
+                        $needsSysdefault = true;
+                        $testOutput = $sysOutput;
+                    }
+                }
                 if ($canOpen && $hasPcmFmt) {
                     $cidNorm = preg_replace('/[^a-zA-Z0-9_]/', '_', strtolower($cardId));
                     $adapterName = 'fpp_alsa_' . $cidNorm;
@@ -3790,6 +3796,7 @@ function GeneratePipeWireGroupsConfig($groups, $returnCardMap = false)
                             'channels' => $unresolvedMaxCh,
                             'rate' => 0,
                             'format' => $unresolvedFmt,
+                            'needsSysdefault' => $needsSysdefault,
                         );
                     }
                 } else {
@@ -3843,10 +3850,15 @@ function GeneratePipeWireGroupsConfig($groups, $returnCardMap = false)
             $resolvedTarget = isset($cardNodeMap[$cid]) ? $cardNodeMap[$cid] : '';
             $targetIsMissingFppAdapter = (strpos($resolvedTarget, 'fpp_alsa_') === 0)
                 && !isset($existingSinks[$resolvedTarget]);
-            // Need a custom adapter if channels >2, explicit rate/period
-            // override, or the config references an fpp_alsa_* node that
-            // nothing else creates.
-            $needsCustom = ($memberCh > 2 || $memberRate > 0 || $memberPeriod > 0
+            // If an fpp_alsa_* boot-time adapter already exists with enough channels,
+            // don't create a duplicate — the boot-time node already covers this card.
+            $existingAdapterChannels = (strpos($resolvedTarget, 'fpp_alsa_') === 0 && isset($existingSinks[$resolvedTarget]))
+                ? $existingSinks[$resolvedTarget] : 0;
+            $bootAdapterSufficient = ($existingAdapterChannels >= $memberCh);
+            // Need a custom adapter if channels >2 (and not already covered by boot node),
+            // explicit rate/period override, or the config references an fpp_alsa_* node
+            // that nothing else creates.
+            $needsCustom = (($memberCh > 2 && !$bootAdapterSufficient) || $memberRate > 0 || $memberPeriod > 0
                 || $targetIsMissingFppAdapter);
             if (!$needsCustom)
                 continue;
@@ -3858,9 +3870,23 @@ function GeneratePipeWireGroupsConfig($groups, $returnCardMap = false)
                 $cidNorm = preg_replace('/[^a-zA-Z0-9_]/', '_', strtolower($cid));
                 // Detect best audio format from ALSA HW params
                 $adapterFmt = 'S16LE';
+                $adapterNeedsSysdefault = false;
                 $cidSafe = preg_match('/^[a-zA-Z0-9_]+$/', $cid) ? $cid : strval(ResolveCardIdToNumber($cid));
                 if (!empty($cidSafe)) {
                     $fmtOut = shell_exec("timeout 2 aplay -D hw:" . escapeshellarg($cidSafe) . " --dump-hw-params /dev/zero 2>&1 | head -40");
+                    // If hw: only exposes IEC958 (e.g. Pi Zero 2 W HDMI with
+                    // KMS), fall back to sysdefault: for PCM format conversion.
+                    // Using sysdefault: instead of plughw: avoids PipeWire's SPA
+                    // ALSA plugin crashing when it probes for a passthrough
+                    // variant by appending "p" to the device path.
+                    if ($fmtOut && strpos($fmtOut, 'IEC958_SUBFRAME_LE') !== false
+                        && strpos($fmtOut, 'S16_LE') === false && strpos($fmtOut, 'S32_LE') === false) {
+                        $sysFmtOut = shell_exec("timeout 2 aplay -D sysdefault:" . escapeshellarg($cidSafe) . " --dump-hw-params /dev/zero 2>&1 | head -40");
+                        if ($sysFmtOut && (strpos($sysFmtOut, 'S16_LE') !== false || strpos($sysFmtOut, 'S32_LE') !== false)) {
+                            $fmtOut = $sysFmtOut;
+                            $adapterNeedsSysdefault = true;
+                        }
+                    }
                     if ($fmtOut && preg_match('/FORMAT[^:]*:\s+(.+)/i', $fmtOut, $fmtM)) {
                         $fmtLine = $fmtM[1];
                         if (strpos($fmtLine, 'S32_LE') !== false) {
@@ -3878,6 +3904,7 @@ function GeneratePipeWireGroupsConfig($groups, $returnCardMap = false)
                     'rate' => $memberRate,
                     'periodSize' => $memberPeriod,
                     'format' => $adapterFmt,
+                    'needsSysdefault' => $adapterNeedsSysdefault,
                 );
             } else {
                 // Card already tracked — merge per-card overrides (first non-zero wins)
@@ -3951,7 +3978,8 @@ function GeneratePipeWireGroupsConfig($groups, $returnCardMap = false)
             }
             $conf .= "      node.description = \"$descStr\"\n";
             $conf .= "      media.class = \"Audio/Sink\"\n";
-            $conf .= "      api.alsa.path = \"hw:$cid\"\n";
+            $alsaPrefix = (!empty($info['needsSysdefault'])) ? 'sysdefault' : 'hw';
+            $conf .= "      api.alsa.path = \"$alsaPrefix:$cid\"\n";
             $adapterPeriod = isset($info['periodSize']) && $info['periodSize'] > 0 ? intval($info['periodSize']) : 1024;
             $conf .= "      api.alsa.period-size = $adapterPeriod\n";
             // USB audio cards need extra headroom: their independent oscillators
@@ -4131,16 +4159,17 @@ function GeneratePipeWireGroupsConfig($groups, $returnCardMap = false)
             $conf .= "        media.class = Audio/Sink\n";
             $conf .= "        audio.channels = $numCh\n";
             $conf .= "        audio.position = $posStr\n";
+            $conf .= "";
             $conf .= "      }\n";
 
             // Playback props (output to real sink)
             $conf .= "      playback.props = {\n";
             $conf .= "        node.name = \"$fxOutName\"\n";
-            $conf .= "        node.passive = true\n";
             $conf .= "        node.target = \"$realNodeName\"\n";
             $conf .= "        stream.dont-remix = true\n";
             $conf .= "        audio.channels = $numCh\n";
             $conf .= "        audio.position = $posStr\n";
+            $conf .= "";
             $conf .= "      }\n";
 
             $conf .= "    }\n"; // args
@@ -4189,6 +4218,7 @@ function GeneratePipeWireGroupsConfig($groups, $returnCardMap = false)
         $conf .= "      combine.latency-compensate = $latencyCompensate\n";
         $conf .= "      combine.props = {\n";
         $conf .= "        audio.position = $groupPos\n";
+        $conf .= "";
         $conf .= "      }\n";
         $conf .= "      stream.props = {\n";
         $conf .= "        stream.dont-remix = true\n";
@@ -4283,7 +4313,13 @@ function RestorePipeWireGroupVolumes($groups = null)
         $groupVol = isset($group['volume']) ? intval($group['volume']) : 100;
         exec($SUDO . " " . $env . " pactl set-sink-volume " . escapeshellarg($groupNodeName) . " {$groupVol}% 2>/dev/null");
 
-        // Set per-member volumes on the filter-chain sink nodes
+        // Set per-member volumes on the filter-chain sink nodes.
+        // Also set the underlying WirePlumber-managed node to 100% when the
+        // member targets one (e.g. HDMI outputs like
+        // alsa_output.platform-*.hdmi.*).  WirePlumber initialises these at
+        // ~40% which would silently attenuate HDMI audio.  FPP-owned nodes
+        // (fpp_alsa_*, aes67_*) are already created at full volume and are
+        // not touched.
         foreach ($group['members'] as $member) {
             $cardId = isset($member['cardId']) ? $member['cardId'] : '';
             if (empty($cardId))
@@ -4292,6 +4328,15 @@ function RestorePipeWireGroupVolumes($groups = null)
             $cardIdNorm = preg_replace('/[^a-zA-Z0-9_]/', '_', strtolower($cardId));
             $fxNodeName = 'fpp_fx_g' . $groupId . '_' . $cardIdNorm;
             exec($SUDO . " " . $env . " pactl set-sink-volume " . escapeshellarg($fxNodeName) . " {$memberVol}% 2>/dev/null");
+
+            // Restore underlying WirePlumber-managed sink to 100% so it does
+            // not silently attenuate the audio delivered by the filter chain.
+            $nodeTarget = isset($member['nodeTarget']) ? $member['nodeTarget'] : '';
+            if (!empty($nodeTarget)
+                && strpos($nodeTarget, 'fpp_') !== 0
+                && strpos($nodeTarget, 'aes67_') !== 0) {
+                exec($SUDO . " " . $env . " pactl set-sink-volume " . escapeshellarg($nodeTarget) . " 100% 2>/dev/null");
+            }
         }
     }
 }
@@ -4455,6 +4500,154 @@ function GetAES67NetworkInterfaces()
 // Status: GET /api/pipewire/aes67/status → queries AES67Manager in fppd
 // PTP: GstPtpClock (replaces external ptp4l daemon)
 // SAP: Built-in C++ SAP announcer (replaces fpp_aes67_sap Python daemon)
+
+/////////////////////////////////////////////////////////////////////////////
+//  OPUS RTP MULTI-INSTANCE API
+/////////////////////////////////////////////////////////////////////////////
+
+// GET /api/pipewire/opusrtp/instances
+function GetOpusRTPInstances()
+{
+    global $settings;
+    $configFile = $settings['mediaDirectory'] . "/config/pipewire-opus-rtp-instances.json";
+    if (file_exists($configFile)) {
+        $data = json_decode(file_get_contents($configFile), true);
+        if ($data !== null) {
+            return json($data);
+        }
+    }
+    return json(array("instances" => array()));
+}
+
+// POST /api/pipewire/opusrtp/instances
+function SaveOpusRTPInstances()
+{
+    global $settings;
+    $configFile = $settings['mediaDirectory'] . "/config/pipewire-opus-rtp-instances.json";
+
+    $data = file_get_contents('php://input');
+    $parsed = json_decode($data, true);
+    if ($parsed === null) {
+        http_response_code(400);
+        return json(array("status" => "ERROR", "message" => "Invalid JSON"));
+    }
+    if (!isset($parsed['instances']) || !is_array($parsed['instances'])) {
+        http_response_code(400);
+        return json(array("status" => "ERROR", "message" => "Missing instances array"));
+    }
+    $nextId = 1;
+    foreach ($parsed['instances'] as &$inst) {
+        if (!isset($inst['id'])) {
+            $inst['id'] = $nextId;
+        }
+        if ($inst['id'] >= $nextId)
+            $nextId = $inst['id'] + 1;
+        if (empty($inst['name']))
+            $inst['name'] = 'Opus RTP Instance ' . $inst['id'];
+        if (empty($inst['mode']))
+            $inst['mode'] = 'send';
+        if (empty($inst['destIP']))
+            $inst['destIP'] = '239.69.1.' . $inst['id'];
+        if (empty($inst['port']))
+            $inst['port'] = 5005;
+        if (empty($inst['channels']))
+            $inst['channels'] = 2;
+        if (!isset($inst['bitrate']))
+            $inst['bitrate'] = 128000;
+        if (!isset($inst['latency']))
+            $inst['latency'] = 50;
+        if (!isset($inst['fec']))
+            $inst['fec'] = true;
+        if (!isset($inst['dtx']))
+            $inst['dtx'] = false;
+        if (!isset($inst['packetLoss']))
+            $inst['packetLoss'] = 5;
+        if (!isset($inst['enabled']))
+            $inst['enabled'] = true;
+    }
+    unset($inst);
+
+    file_put_contents($configFile, json_encode($parsed, JSON_PRETTY_PRINT));
+    return json(array("status" => "OK"));
+}
+
+// POST /api/pipewire/opusrtp/apply
+function ApplyOpusRTPInstances()
+{
+    global $settings;
+    $configFile = $settings['mediaDirectory'] . "/config/pipewire-opus-rtp-instances.json";
+
+    if (!file_exists($configFile)) {
+        $result = @file_get_contents('http://localhost/api/command', false, stream_context_create(array(
+            'http' => array(
+                'method' => 'POST',
+                'header' => 'Content-Type: application/json',
+                'content' => json_encode(array('command' => 'Opus RTP Cleanup')),
+                'timeout' => 5
+            )
+        )));
+        return json(array("status" => "OK", "message" => "No Opus RTP instances configured"));
+    }
+
+    $result = @file_get_contents('http://localhost/api/command', false, stream_context_create(array(
+        'http' => array(
+            'method' => 'POST',
+            'header' => 'Content-Type: application/json',
+            'content' => json_encode(array('command' => 'Opus RTP Apply')),
+            'timeout' => 10
+        )
+    )));
+
+    if ($result === false) {
+        return json(array(
+            "status" => "ERROR",
+            "message" => "Failed to signal fppd — is it running?"
+        ));
+    }
+
+    return json(array(
+        "status" => "OK",
+        "message" => "Opus RTP configuration applied via GStreamer"
+    ));
+}
+
+// GET /api/pipewire/opusrtp/status
+function GetOpusRTPStatus()
+{
+    $result = @file_get_contents('http://localhost:32322/opusrtp/status');
+
+    if ($result !== false) {
+        $data = json_decode($result, true);
+        if ($data !== null) {
+            return json($data);
+        }
+    }
+
+    return json(array(
+        "pipelines" => array(),
+        "active" => false
+    ));
+}
+
+// GET /api/pipewire/opusrtp/interfaces
+function GetOpusRTPNetworkInterfaces()
+{
+    $interfaces = array();
+    exec("ip -o link show | awk -F': ' '{print \$2}' | grep -v lo", $output);
+    if (!empty($output)) {
+        foreach ($output as $iface) {
+            $iface = trim($iface);
+            if (!empty($iface))
+                $interfaces[] = $iface;
+        }
+    }
+    return json($interfaces);
+}
+
+// Opus RTP audio streaming is managed by OpusRTPManager in fppd (GStreamer-based).
+// Config JSON: $mediaDirectory/config/pipewire-opus-rtp-instances.json
+// Apply: POST /api/command {"command":"Opus RTP Apply"} → fppd rebuilds GStreamer pipelines
+// Status: GET /api/pipewire/opusrtp/status → queries OpusRTPManager in fppd
 
 /////////////////////////////////////////////////////////////////////////////
 // GET /api/pipewire/graph
@@ -6076,7 +6269,9 @@ function ResolveAlsaCardNumberToId($cardNum)
 // Returns an array shaped like the contents of pipewire-audio-groups.json.
 function BuildSimpleAudioGroupsData($audioOutput)
 {
-    $cardId = ResolveAlsaCardNumberToId($audioOutput);
+    // $audioOutput is the persisted AudioOutput value (a stable ALSA card ID,
+    // or a legacy numeric index). Normalize either form to a card ID.
+    $cardId = NormalizeAudioOutputToCardId($audioOutput);
     if ($cardId === '') {
         return array("groups" => array());
     }
@@ -6154,7 +6349,7 @@ function BuildSimpleVideoGroupsData($videoOutput)
 //
 // Returns a JSON-encoded status response (compatible with the existing
 // /api/pipewire/audio/groups/apply contract).
-function ApplyPipeWireSimpleConfig()
+function ApplyPipeWireSimpleConfig($skipRestart = false)
 {
     global $settings;
 
@@ -6171,18 +6366,18 @@ function ApplyPipeWireSimpleConfig()
     @file_put_contents($audioRecord, json_encode($audioData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
     @file_put_contents($videoRecord, json_encode($videoData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 
-    // Apply audio first (restarts pipewire services), then video.
+    // Apply audio first (restarts pipewire services unless $skipRestart), then video.
     // Both functions accept an in-memory override and skip writing to the
     // advanced-mode JSON files when invoked this way.
     ob_start();
-    ApplyPipeWireAudioGroups($audioData);
+    ApplyPipeWireAudioGroups($audioData, $skipRestart);
     ob_end_clean();
 
     ob_start();
     ApplyPipeWireVideoGroups($videoData);
     ob_end_clean();
 
-    $cardId = ResolveAlsaCardNumberToId($audioOutput);
+    $cardId = NormalizeAudioOutputToCardId($audioOutput);
     return json(array(
         "status" => "OK",
         "message" => "Simple PipeWire config applied",

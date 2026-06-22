@@ -276,7 +276,8 @@ function GetUpdateStatus()
                 "latestMajorVersion" => $currentMajor
             ));
         } else if ($test === 'both') {
-            // Simulate: branch upgrade AND commits behind
+            // Simulate: FPP branch upgrade AND OS upgrade both available
+            // (exercises the "Recommended: Upgrade OS First" recommendation banner)
             return json(array(
                 "status" => "OK",
                 "branchUpgradeAvailable" => true,
@@ -287,6 +288,7 @@ function GetUpdateStatus()
                 "remoteCommit" => "def456789",
                 "currentBranch" => "v9.4",
                 "localCommit" => $localCommit,
+                "forceOsUpgradeAvailable" => true,
                 "isEndOfLife" => false,
                 "latestMajorVersion" => $currentMajor
             ));
@@ -324,8 +326,13 @@ function GetUpdateStatus()
         }
     }
 
-    // Get the latest release version from GitHub (cached)
-    $latestReleaseVersion = file_cache('github_latest_release', function () {
+    // Get the latest release from GitHub (cached). releases/latest only returns
+    // full, published releases, and the response already includes the asset
+    // list, so we record both the version and whether a downloadable OS image
+    // (.fppos) exists for this device without making a second request.
+    $latestRelease = file_cache('github_latest_release', function () {
+        global $settings;
+
         $ch = curl_init('https://api.github.com/repos/FalconChristmas/fpp/releases/latest');
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_USERAGENT, 'FPP');
@@ -333,17 +340,30 @@ function GetUpdateStatus()
         $response = curl_exec($ch);
         curl_close($ch);
 
+        $result = ['version' => '', 'hasDeviceAsset' => false];
         if ($response) {
             $releaseData = json_decode($response, true);
             if (isset($releaseData['tag_name'])) {
-                return $releaseData['tag_name'];
+                $result['version'] = $releaseData['tag_name'];
+            }
+            if (isset($releaseData['assets']) && is_array($releaseData['assets'])) {
+                foreach ($releaseData['assets'] as $asset) {
+                    if (MatchesDeviceOSImage($asset['name'] ?? '', $settings)) {
+                        $result['hasDeviceAsset'] = true;
+                        break;
+                    }
+                }
             }
         }
-        return '';
+        return json_encode($result);
     }, 300, 60);
 
+    $latestReleaseData = json_decode($latestRelease, true) ?: [];
+    $latestReleaseVersion = $latestReleaseData['version'] ?? '';
+    $latestReleaseHasDeviceAsset = !empty($latestReleaseData['hasDeviceAsset']);
+
     // Get unified update status
-    $updateStatus = check_fppstats_updates($latestReleaseVersion);
+    $updateStatus = check_fppstats_updates($latestReleaseVersion, $latestReleaseHasDeviceAsset);
 
     // Get current major version
     $currentMajor = getFPPMajorVersion();

@@ -18,6 +18,7 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/uio.h>
 #include <cstring>
 #include <ctime>
@@ -70,6 +71,7 @@ int SocketFrameBuffer::InitializeFrameBuffer(void) {
     m_fbFd = socket(AF_UNIX, SOCK_DGRAM, 0);
     if (m_fbFd < 0) {
         LogErr(VB_CHANNELOUT, "Error opening FrameBuffer device: %s\n", devString.c_str());
+        WarningHolder::AddWarning(36, "Framebuffer output: could not open device " + devString);
         return 0;
     }
 
@@ -141,12 +143,37 @@ void SocketFrameBuffer::sendFramebufferConfig() {
 
 void SocketFrameBuffer::sendFramebufferFrame() {
     // CMD 2 - sync, param is page#
-    bool fe = FileExists(dev_address.sun_path);
+    if (!targetExists) {
+        // Not connected yet. The monitor app (FPPMon) may have started — and
+        // set framebufferControlSocketPath — after fppd initialized, so the
+        // path cached at init can be stale (the default "/dev"). Re-read it
+        // while disconnected so we pick up the real socket path.
+        std::string devString = getSetting("framebufferControlSocketPath", "/dev") + "/" + m_device;
+        if (strncmp(dev_address.sun_path, devString.c_str(), sizeof(dev_address.sun_path)) != 0) {
+            memset(dev_address.sun_path, 0, sizeof(dev_address.sun_path));
+            strncpy(dev_address.sun_path, devString.c_str(), sizeof(dev_address.sun_path) - 1);
+        }
+    }
+
+    // Detect (re)creation of the socket by inode. FPPMon binds with
+    // unlink()+bind(), so when it restarts (or starts after us) the path may
+    // already exist as a *stale* file from a prior run — a plain FileExists()
+    // check would never notice the new socket and we'd never re-send the
+    // config (size + shmem fd), leaving the new FPPMon with page updates but
+    // no buffer. Re-send the config whenever the inode changes.
+    struct stat st;
+    bool fe = (stat(dev_address.sun_path, &st) == 0);
+    if (fe && st.st_ino != m_lastInode) {
+        m_lastInode = st.st_ino;
+        targetExists = false;  // force a fresh config send below
+    }
+
     if (!targetExists && fe) {
         sendFramebufferConfig();
         targetExists = true;
     } else if (!fe) {
         targetExists = false;
+        m_lastInode = 0;
     }
     if (targetExists) {
         uint16_t data[2] = { 2, (uint16_t)m_cPage };

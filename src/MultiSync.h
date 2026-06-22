@@ -264,6 +264,9 @@ public:
 
     void Ping(int discover = 0, bool broadcast = true);
     void PingSingleRemote(const char* address, int discover = 0);
+    // Detect/refresh a single non-multisync remote (e.g. a WLED node found
+    // via mDNS) by fetching its HTTP root and running controller detection.
+    void PingSingleRemoteViaHTTP(const std::string& address);
     void Discover(void);
     void PeriodicPing();
 
@@ -292,7 +295,7 @@ public:
     void SyncSyncedSequence(const std::string& filename, int frameNumber, float secondsElapsed);
 
     void OpenSyncedMedia(const std::string& filename);
-    void StartSyncedMedia(const std::string& filename);
+    void StartSyncedMedia(const std::string& filename, float secondsElapsed = 0.0f);
     void StopSyncedMedia(const std::string& filename);
     void SyncSyncedMedia(const std::string& filename, int frameNumber, float secondsElapsed);
 
@@ -315,7 +318,6 @@ private:
 
     void setupMulticastReceive(bool cycle);
     void PingSingleRemote(MultiSyncSystem& sys, int discover = 0);
-    void PingSingleRemoteViaHTTP(const std::string& address);
     int CreatePingPacket(MultiSyncSystem& sys, char* outBuf, int discover);
 
     bool FillLocalSystemInfo(void);

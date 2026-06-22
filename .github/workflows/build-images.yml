@@ -44,6 +44,7 @@ concurrency:
 jobs:
   prep:
     runs-on: ubuntu-latest
+    if: github.repository == 'FalconChristmas/fpp'   # Only run nightly builds on main repo
     outputs:
       version: ${{ steps.ver.outputs.version }}
       is_release: ${{ steps.ver.outputs.is_release }}
@@ -218,6 +219,7 @@ jobs:
           path: |
             output/FPP-v*-${{ matrix.suffix }}.img.zip
             output/${{ matrix.suffix }}-*.fppos
+            output/ccache-${{ matrix.suffix }}.tar.gz
           if-no-files-found: error
           retention-days: 14
 
@@ -238,7 +240,7 @@ jobs:
       - name: Flatten artifact directory
         run: |
           mkdir -p release-files
-          find artifacts -type f \( -name '*.img.zip' -o -name '*.fppos' \) \
+          find artifacts -type f \( -name '*.img.zip' -o -name '*.fppos' -o -name 'ccache-*.tar.gz' \) \
             -exec cp -v {} release-files/ \;
           ls -la release-files/
 
@@ -277,7 +279,7 @@ jobs:
       - name: Flatten artifact directory
         run: |
           mkdir -p release-files
-          find artifacts -type f \( -name '*.img.zip' -o -name '*.fppos' \) \
+          find artifacts -type f \( -name '*.img.zip' -o -name '*.fppos' -o -name 'ccache-*.tar.gz' \) \
             -exec cp -v {} release-files/ \;
           ls -la release-files/
 

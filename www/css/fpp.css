@@ -1259,7 +1259,8 @@ body.is-loading #schedulerInfo .labelValue:before {
 }
 
 #playerTime > div:last-child .labelValue,
-.tblPlaylistHeaderDetails > div:last-child .labelValue {
+.tblPlaylistHeaderDetails > div:last-child .labelValue,
+.tblPlaylistHeaderDetails > div.lastVisibleDetail .labelValue {
 	border-top-right-radius: 28px;
 	border-bottom-right-radius: 28px;
 }
@@ -1484,7 +1485,8 @@ body.is-loading #schedulerInfo .labelValue:before {
 	padding-left: 30px;
 }
 
-.tblPlaylistHeaderDetails > div:last-child > div {
+.tblPlaylistHeaderDetails > div:last-child > div,
+.tblPlaylistHeaderDetails > div.lastVisibleDetail > div {
 	padding-right: 30px;
 }
 
@@ -1697,6 +1699,50 @@ body.is-loading #schedulerInfo .labelValue:before {
 .playlistRowEditActionCell {
 	width: 150px;
 	text-align: right;
+}
+
+.playlistRowCheckCell {
+	width: 32px;
+	padding: 0.4em 0.4em !important;
+	text-align: center;
+	display: none;
+}
+
+.playlistSelectMode .playlistRowCheckCell {
+	display: table-cell;
+}
+
+.playlistSelectMode .playlistRowCheckCell + .center {
+	display: none;
+}
+
+.playlistSelectMode .playlistRowEditActionCell {
+	display: none;
+}
+
+.playlistEntryCheckbox {
+	cursor: pointer;
+	width: 16px;
+	height: 16px;
+}
+
+.playlistSelectMode .playlistSelectedEntry {
+	background-color: transparent !important;
+}
+
+.playlistSelectMode .playlistSelectModeBtn {
+	background-color: var(--bs-success);
+	color: #fff;
+}
+
+.playlistSelectActionsDropdown .buttons {
+	background-color: var(--bs-success);
+	color: #fff;
+	font-size: 0.85em;
+}
+
+.playlistSelectActionsDropdown .buttons:hover {
+	filter: brightness(1.1);
 }
 
 .hasPlaylistDetailsLoaded .playlistEditorContainer {
@@ -3926,7 +3972,8 @@ a.api-anchor {
 	}
 
 	#playerTime > div:last-child > div,
-	.tblPlaylistHeaderDetails > div:last-child > div {
+	.tblPlaylistHeaderDetails > div:last-child > div,
+	.tblPlaylistHeaderDetails > div.lastVisibleDetail > div {
 		padding-right: 10px;
 	}
 

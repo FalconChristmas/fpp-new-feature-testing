@@ -1404,7 +1404,7 @@ function StreamURL (
 					outputArea.nodeName == 'PRE' ||
 					outputArea.nodeName == 'SPAN'
 				) {
-					if (outputArea.nodename != 'PRE' && raw == false) {
+					if (outputArea.nodeName != 'PRE' && raw == false) {
 						this_response = this_response.replace(/(?:\r\n|\r|\n)/g, '<br>');
 					}
 
@@ -2022,6 +2022,13 @@ function VerbosePlaylistItemDetailsToggled () {
 		$('.psiDataSimple').show();
 		$('.psiData').hide();
 	}
+
+	// The Randomised / Global Pause indicators are tied to this setting too.
+	if (typeof window.updateMainPageGlobalPauseIndicator === 'function') {
+		window.updateMainPageGlobalPauseIndicator();
+	}
+	// And the Randomize / Global Pause rows in the playlist details header.
+	UpdatePlaylistHeaderDetailVisibility();
 }
 
 function GetPlaylistDurationDiv (entry) {
@@ -2048,6 +2055,8 @@ function GetPlaylistRowHTML (ID, entry, editMode) {
 
 	if (editMode) {
 		HTML += "<tr class='playlistRow'>";
+		HTML +=
+			"<td class='playlistRowCheckCell'><input type='checkbox' class='playlistEntryCheckbox' onchange='UpdatePlaylistSelectCount()' /></td>";
 		HTML +=
 			"<td class='center' valign='middle'> <div class='rowGrip'><i class='rowGripIcon fpp-icon-grip'></i></div></td>";
 	} else {
@@ -2309,6 +2318,10 @@ function EditPlaylist () {
 	var name = $('#playlistSelect').val();
 	EnableButtonClass('playlistEditButton');
 	DisableButtonClass('playlistDetailsEditButton');
+
+	if (typeof ExitPlaylistSelectMode === 'function') {
+		ExitPlaylistSelectMode();
+	}
 
 	LoadPlaylistDetails(name);
 	$('#playlistEditor').addClass('hasPlaylistDetailsLoaded');
@@ -2944,6 +2957,14 @@ function updateAddGlobalPauseIndicator () {
 
 // Function to manually check and update the main page global pause indicator
 window.updateMainPageGlobalPauseIndicator = function () {
+	// Only show the Randomised / Global Pause indicators when the user has
+	// enabled Verbose Playlist Item Details.
+	if (!$('#verbosePlaylistItemDetails').is(':checked')) {
+		$('#globalPauseIndicator').hide();
+		$('#randomizeIndicator').hide();
+		return;
+	}
+
 	// Check if a playlist is currently selected (not sequence or media)
 	var selectedValue = $('#playlistSelect').val();
 	var isPlaylistSelected = false;
@@ -2961,7 +2982,22 @@ window.updateMainPageGlobalPauseIndicator = function () {
 	// Only proceed if a playlist is selected
 	if (!isPlaylistSelected) {
 		$('#globalPauseIndicator').hide();
+		$('#randomizeIndicator').hide();
 		return;
+	}
+
+	// Helper to update randomize indicator from playlist data
+	function updateRandomizeFromPlaylist(playlistData) {
+		if (playlistData && playlistData.random && playlistData.random > 0) {
+			$('#randomizeIndicator').show();
+			if (playlistData.random == 1) {
+				$('#randomizeStatus').text('Once at load time');
+			} else if (playlistData.random == 2) {
+				$('#randomizeStatus').text('Once per iteration');
+			}
+		} else {
+			$('#randomizeIndicator').hide();
+		}
 	}
 
 	// First try to get the current player status to see if we're actively playing
@@ -3002,10 +3038,33 @@ window.updateMainPageGlobalPauseIndicator = function () {
 					} else {
 						$('#globalPauseIndicator').hide();
 					}
+					updateRandomizeFromPlaylist(playlistData);
 				}
 			).fail(function () {
-				// If we can't load the playlist, hide the indicator
+				// If we can't load the playlist, hide the indicators
 				$('#globalPauseIndicator').hide();
+				$('#randomizeIndicator').hide();
+			});
+			return;
+		}
+
+		// Update randomize from player status
+		if (statusData && statusData.random && statusData.random > 0) {
+			$('#randomizeIndicator').show();
+			if (statusData.random == 1) {
+				$('#randomizeStatus').text('Once at load time');
+			} else if (statusData.random == 2) {
+				$('#randomizeStatus').text('Once per iteration');
+			}
+		} else {
+			// Fall back to playlist data for randomize
+			$.get(
+				'api/playlist/' + encodeURIComponent(selectedValue),
+				function (playlistData) {
+					updateRandomizeFromPlaylist(playlistData);
+				}
+			).fail(function () {
+				$('#randomizeIndicator').hide();
 			});
 		}
 	}).fail(function () {
@@ -3026,10 +3085,12 @@ window.updateMainPageGlobalPauseIndicator = function () {
 				} else {
 					$('#globalPauseIndicator').hide();
 				}
+				updateRandomizeFromPlaylist(playlistData);
 			}
 		).fail(function () {
-			console.log('Failed to get playlist data for global pause indicator');
+			console.log('Failed to get playlist data for indicators');
 			$('#globalPauseIndicator').hide();
+			$('#randomizeIndicator').hide();
 		});
 	});
 };
@@ -5249,7 +5310,7 @@ function parseStatus (jsonStatus) {
 			$('.schedulerEndTime').hide();
 			$('body').removeClass('schedulderStatusPlaying');
 
-			// Update global pause indicator based on selected playlist
+			// Update global pause and randomize indicators based on selected playlist
 			if (typeof window.updateMainPageGlobalPauseIndicator === 'function') {
 				window.updateMainPageGlobalPauseIndicator();
 			}
@@ -5367,8 +5428,30 @@ function parseStatus (jsonStatus) {
 				$('#chkRepeat').prop('checked', false);
 			}
 
+			// Randomised / Global Pause indicators are only shown when the user
+			// has enabled Verbose Playlist Item Details.
+			var showPlaylistIndicators = $('#verbosePlaylistItemDetails').is(
+				':checked'
+			);
+
+			// Update randomize indicator - only show when enabled
+			if (showPlaylistIndicators && jsonStatus.random && jsonStatus.random > 0) {
+				$('#randomizeIndicator').show();
+				if (jsonStatus.random == 1) {
+					$('#randomizeStatus').text('Once at load time');
+				} else if (jsonStatus.random == 2) {
+					$('#randomizeStatus').text('Once per iteration');
+				}
+			} else {
+				$('#randomizeIndicator').hide();
+			}
+
 			// Update global pause indicator - only show for playlists
-			if (jsonStatus.global_pause && jsonStatus.global_pause.configured) {
+			if (
+				showPlaylistIndicators &&
+				jsonStatus.global_pause &&
+				jsonStatus.global_pause.configured
+			) {
 				$('#globalPauseIndicator').show();
 				if (jsonStatus.global_pause.active) {
 					$('#globalPauseStatus')
@@ -5437,7 +5520,7 @@ function parseStatus (jsonStatus) {
 			if (fppStatus == STATUS_PAUSED) {
 				playerStatusText = 'Paused ';
 			}
-			playerStatusTest =
+			playerStatusText =
 				"<strong>'" + jsonStatus.current_sequence + "'</strong>";
 			SetButtonState('#btnPlay', 'disable');
 			SetButtonState('#btnPrev', 'enable');
@@ -5511,17 +5594,19 @@ function ShowMultiSyncStats (data) {
 	var now = new Date().getTime();
 	var rows = [];
 
-	// Sort so the syncing player (master) appears at the top of the list
+	// Sort: 127.0.0.1 first, then the syncing player (master), then the rest
 	var systems = data.systems.slice();
-	if (data.masterIP) {
-		systems.sort(function (a, b) {
-			if (a.sourceIP === data.masterIP && b.sourceIP !== data.masterIP)
-				return -1;
-			if (b.sourceIP === data.masterIP && a.sourceIP !== data.masterIP)
-				return 1;
-			return 0;
-		});
-	}
+	systems.sort(function (a, b) {
+		var aIs127 = a.sourceIP === '127.0.0.1';
+		var bIs127 = b.sourceIP === '127.0.0.1';
+		if (aIs127 !== bIs127) return aIs127 ? -1 : 1;
+		if (data.masterIP) {
+			var aIsMaster = a.sourceIP === data.masterIP;
+			var bIsMaster = b.sourceIP === data.masterIP;
+			if (aIsMaster !== bIsMaster) return aIsMaster ? -1 : 1;
+		}
+		return 0;
+	});
 
 	for (var i = 0; i < systems.length; i++) {
 		var s = systems[i];
@@ -5769,7 +5854,7 @@ function SetSetting (
 					SetRestartFlag(restart);
 				}
 				if (reboot > 0 && reboot != settings['rebootFlag']) {
-					SetRebootFlag(restart);
+					SetRebootFlag(reboot);
 				}
 				CheckRestartRebootFlags();
 
@@ -5825,7 +5910,7 @@ function SetPluginSetting (
 					SetRestartFlag(restart);
 				}
 				if (reboot > 0 && reboot != settings['rebootFlag']) {
-					SetRebootFlag(restart);
+					SetRebootFlag(reboot);
 				}
 				CheckRestartRebootFlags();
 
@@ -6131,7 +6216,13 @@ function PopulatePlaylists (sequencesAlso, options) {
 			sequenceArray = sequences[0];
 			mediaArray = media[0];
 
-			if (sequencesAlso) playlistOptionsText += "<optgroup label='Playlists'>";
+			if (sequencesAlso) {
+				// Default to a placeholder rather than auto-selecting the first
+				// playlist (whose details aren't loaded on page load anyway).
+				playlistOptionsText +=
+					'<option value="" selected>&lt;Select Playlist or Sequence&gt;</option>';
+				playlistOptionsText += "<optgroup label='Playlists'>";
+			}
 			for (let j = 0; j < playListArray.length; j++) {
 				playlistOptionsText +=
 					'<option value="' +
@@ -6667,9 +6758,37 @@ function UpgradePlaylist (data, editMode) {
 	return data;
 }
 
+// Tracks whether the playlist details were last rendered for the editor (1) or
+// the read-only status page (0), so the shared verbose toggle handler knows the
+// current context.
+var gblPlaylistDetailsEditMode = 0;
+
+// Show/hide the Randomize & Global Pause rows in the Main Playlist header.
+// In the playlist editor they are always shown when configured. On the status
+// page they only appear when Verbose Playlist Item Details is enabled.
+function UpdatePlaylistHeaderDetailVisibility () {
+	var allowed =
+		gblPlaylistDetailsEditMode == 1 ||
+		$('#verbosePlaylistItemDetails').length == 0 ||
+		$('#verbosePlaylistItemDetails').is(':checked');
+	$('#playlistRandomizeDetails').toggle(
+		allowed && $('#playlistRandomizeDetails').data('hasValue') === true
+	);
+	$('#playlistMainGlobalPauseDetails').toggle(
+		allowed && $('#playlistMainGlobalPauseDetails').data('hasValue') === true
+	);
+
+	// Update rounded corner on last visible detail field
+	$('.tblPlaylistHeaderDetails').each(function () {
+		$(this).children('div').removeClass('lastVisibleDetail');
+		$(this).children('div:visible:last').addClass('lastVisibleDetail');
+	});
+}
+
 function PopulatePlaylistDetails (data, editMode, name = '') {
 	var innerHTML = '';
 	var entries = 0;
+	gblPlaylistDetailsEditMode = editMode ? 1 : 0;
 	data = UpgradePlaylist(data, editMode);
 
 	if (!editMode) $('#deprecationWarning').hide(); // will re-show if we find any
@@ -6748,11 +6867,16 @@ function PopulatePlaylistDetails (data, editMode, name = '') {
 	} else {
 		$('#randomizePlaylist').val(data.random);
 	}
-	if (data.random == 0) {
+	if (data.random == 1) {
+		$('#txtRandomize').html('Once at load time');
+		$('#playlistRandomizeDetails').data('hasValue', true);
+	} else if (data.random == 2) {
+		$('#txtRandomize').html('Once per iteration');
+		$('#playlistRandomizeDetails').data('hasValue', true);
+	} else {
 		$('#txtRandomize').html('Off');
-	} else if (data.random == 1) $('#txtRandomize').html('Once at load time');
-	else if (data.random == 2) $('#txtRandomize').html('Once per iteration');
-	else $('#txtRandomize').html('Invalid value');
+		$('#playlistRandomizeDetails').data('hasValue', false);
+	}
 
 	// Update main playlist view global pause indicator
 	if (
@@ -6764,11 +6888,16 @@ function PopulatePlaylistDetails (data, editMode, name = '') {
 				data.globalPauseBetweenSequencesMS +
 				'ms</span>'
 		);
+		$('#playlistMainGlobalPauseDetails').data('hasValue', true);
 	} else {
 		$('#txtGlobalPause').html(
 			'<span class="btn btn-sm btn-secondary" style="padding: 2px 6px; font-size: 10px;">Disabled</span>'
 		);
+		$('#playlistMainGlobalPauseDetails').data('hasValue', false);
 	}
+
+	// Show/hide the Randomize & Global Pause rows (respects verbose setting)
+	UpdatePlaylistHeaderDetailVisibility();
 
 	// Load global pause between sequences setting
 	if (typeof data.globalPauseBetweenSequencesMS === 'undefined') {
@@ -6799,6 +6928,10 @@ function PopulatePlaylistDetailsEntries (playselected, playList) {
 	var url = '';
 
 	if (playselected == true) {
+		// Nothing selected (the placeholder option) - nothing to load.
+		if (!$('#playlistSelect').val()) {
+			return;
+		}
 		pl = $('#playlistSelect :selected').text();
 		url = 'api/playlist/' + pl + '?mergeSubs=1';
 	} else {

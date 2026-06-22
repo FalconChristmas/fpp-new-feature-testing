@@ -177,7 +177,7 @@ int BBBSerialOutput::Init(Json::Value config) {
         }
         if (!CapeUtils::INSTANCE.getStringConfig(device + verPostf, root)) {
             LogErr(VB_CHANNELOUT, "Could not read pin configuration for %s%s\n", device.c_str(), verPostf.c_str());
-            WarningHolder::AddWarning("BBBSerial: Could not read pin configuration for " + device + verPostf);
+            WarningHolder::AddWarning(13, "BBBSerial: Could not read pin configuration for " + device + verPostf);
             return 0;
         }
     }
@@ -226,7 +226,7 @@ int BBBSerialOutput::Init(Json::Value config) {
     compileSerialPRUCode(args);
     if (!FileExists(pru_program.c_str())) {
         LogErr(VB_CHANNELOUT, "%s does not exist!\n", pru_program.c_str());
-        WarningHolder::AddWarning("BBBSerial: Could not compile PRU program");
+        WarningHolder::AddWarning(26, "BBBSerial: Could not compile PRU program");
         return 0;
     }
     LogDebug(VB_CHANNELOUT, "Using program %s\n", pru_program.c_str());
@@ -239,7 +239,7 @@ int BBBSerialOutput::Init(Json::Value config) {
     m_serialData->response = 0;
     if (!m_pru->run(pru_program)) {
         LogErr(VB_CHANNELOUT, "BBBSerial: Unable to start PRU. May require a reboot.\n");
-        WarningHolder::AddWarning("BBBSerial: Unable to start PRU. May require a reboot.");
+        WarningHolder::AddWarning(20, "BBBSerial: Unable to start PRU. May require a reboot.");
         return 0;
     }
 

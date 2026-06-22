@@ -64,7 +64,7 @@ UDMXOutput::UDMXOutput(unsigned int startChannel, unsigned int channelCount) :
 
     if (libusb_init(&m_ctx) != 0) {
         LogErr(VB_CHANNELOUT, "Error Starting LibUSB\n");
-        WarningHolder::AddWarning("USBDMX: Error Starting LibUSB");
+        WarningHolder::AddWarning(28, "USBDMX: Error Starting LibUSB");
         return;
     }
 
@@ -80,14 +80,18 @@ UDMXOutput::UDMXOutput(unsigned int startChannel, unsigned int channelCount) :
         }
 
         if (isValidDevice(&desc)) {
-			LogDebug(VB_CHANNELOUT, "UDMX Device Found\n");
+            LogDebug(VB_CHANNELOUT, "UDMX Device Found\n");
             m_device = dev;
         }
     }
 
-	if (nullptr == m_device) {
+    if (m_device)
+        libusb_ref_device(m_device);
+    libusb_free_device_list(devices, 1);
+
+    if (nullptr == m_device) {
         LogErr(VB_CHANNELOUT, "No UDMX Device Found\n");
-        WarningHolder::AddWarning("USBDMX: No UDMX Device Found");
+        WarningHolder::AddWarning(28, "USBDMX: No UDMX Device Found");
     }
 }
 
@@ -101,22 +105,20 @@ void UDMXOutput::GetRequiredChannelRanges(const std::function<void(int, int)>& a
 int UDMXOutput::Init(Json::Value config) {
     LogDebug(VB_CHANNELOUT, "UDMXOutput::Init()\n");
 
-    m_dataLen = m_channelCount + 1;
-
     if (nullptr != m_device && nullptr == m_handle) {
         int ret = libusb_open(m_device, &m_handle);
         if (ret < 0) {
             LogErr(VB_CHANNELOUT, "Error Opening USB Device (bus %d, device %d)",
                    libusb_get_bus_number(m_device), libusb_get_device_address(m_device));
 
-            WarningHolder::AddWarning("USBDMX: Error Opening USB Device");
+            WarningHolder::AddWarning(28, "USBDMX: Error Opening USB Device");
             return 0;
         }
     }
 
     if (nullptr == m_handle) {
         LogErr(VB_CHANNELOUT, "USBDMX: Error Opening uDMX Device\n");
-        WarningHolder::AddWarning("USBDMX: Error Opening uDMX Device");
+        WarningHolder::AddWarning(28, "USBDMX: Error Opening uDMX Device");
         return 0;
     }
     return ThreadedChannelOutput::Init(config);
@@ -146,12 +148,12 @@ void UDMXOutput::WaitTimedOut() {
                                 (uint8_t)LIBUSB_REQUEST_TYPE_VENDOR |
                                     (uint8_t)LIBUSB_RECIPIENT_INTERFACE |
                                     (uint8_t)LIBUSB_ENDPOINT_OUT,
-                                UDMX_SET_CHANNEL_RANGE,       /* Command */
-                                m_dataLen,                    /* Number of channels to set */
-                                0,                            /* Starting index */
-                                (unsigned char*)m_outputData, /* Values to set */
-                                m_dataLen,                    /* Size of values */
-                                500);                         /* Timeout 500ms */
+                                UDMX_SET_CHANNEL_RANGE,                            /* Command */
+                                m_channelCount,                                    /* Number of channels to set */
+                                0,                                                 /* Starting index */
+                                (unsigned char*)(m_outputData + m_dataOffset),    /* Values to set */
+                                m_channelCount,                                    /* Size of values */
+                                500);                                              /* Timeout 500ms */
     }
 }
 

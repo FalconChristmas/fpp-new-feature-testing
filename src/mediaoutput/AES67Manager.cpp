@@ -77,6 +77,19 @@ bool AES67Manager::Init() {
         return true;
     }
 
+    // AES67 uses pipewiresrc/pipewiresink which require the full PipeWire graph.
+    // Only proceed when MediaBackend is "pipewire" (the advanced PipeWire mode).
+    // - ALSA / no backend: PipeWire daemon is not running; gst_parse_launch with
+    //   pipewiresrc crashes in gst_value_deserialize (NULL deref at addr 0x4).
+    // - pipewire-simple: the graph lacks the node connections needed for audio
+    //   format negotiation, causing the state change to block indefinitely.
+    std::string mediaBackend = toLowerCopy(getSetting("MediaBackend"));
+    if (mediaBackend != "pipewire") {
+        LogDebug(VB_MEDIAOUT, "AES67Manager: MediaBackend='%s' (need 'pipewire'), skipping AES67 init\n",
+                 mediaBackend.c_str());
+        return true;
+    }
+
     // Check if the config file exists
     if (!FileExists(m_configPath)) {
         LogDebug(VB_MEDIAOUT, "AES67Manager: No config file at %s, skipping init\n",
@@ -178,6 +191,11 @@ bool AES67Manager::ApplyConfig() {
     if (!m_initialized.load()) {
         if (!Init()) {
             return false;
+        }
+        // Init() may return true but skip initialization (e.g. wrong backend).
+        // If m_initialized is still false, there's nothing to do.
+        if (!m_initialized.load()) {
+            return true;
         }
     }
 
@@ -319,6 +337,7 @@ bool AES67Manager::InitPTP() {
     // Check if ptp4l binary exists
     if (!FileExists("/usr/sbin/ptp4l")) {
         LogErr(VB_MEDIAOUT, "AES67Manager: ptp4l not found — install linuxptp package\n");
+        WarningHolder::AddWarning(45, "AES67: ptp4l not found — install the linuxptp package");
         return false;
     }
 
@@ -329,6 +348,7 @@ bool AES67Manager::InitPTP() {
         if (!conf.is_open()) {
             LogErr(VB_MEDIAOUT, "AES67Manager: Cannot write PTP config to %s\n",
                    m_ptpConfPath.c_str());
+            WarningHolder::AddWarning(45, "AES67: could not write PTP configuration file");
             return false;
         }
         // AES67 PTP profile: domain 0, two-step, high announce/sync rate
@@ -360,6 +380,7 @@ bool AES67Manager::InitPTP() {
     pid_t pid = fork();
     if (pid < 0) {
         LogErr(VB_MEDIAOUT, "AES67Manager: fork() failed for ptp4l: %s\n", strerror(errno));
+        WarningHolder::AddWarning(45, "AES67: could not start the ptp4l clock-sync process");
         return false;
     }
     if (pid == 0) {
@@ -432,6 +453,7 @@ bool AES67Manager::InitPTP() {
         usleep(500000);
         if (!IsPtp4lRunning()) {
             LogErr(VB_MEDIAOUT, "AES67Manager: ptp4l failed even with software timestamping\n");
+            WarningHolder::AddWarning(45, "AES67: PTP clock sync (ptp4l) could not start on the configured interface");
             m_ptp4lPid = -1;
             return false;
         }
@@ -559,8 +581,7 @@ bool AES67Manager::CreateSendPipeline(const AES67Instance& inst) {
     //   ! udpsink host=<multicast> port=<port> multicast-iface=<iface> ttl-mc=4 auto-multicast=true sync=true
 
     std::ostringstream oss;
-    oss << "pipewiresrc min-buffers=2 stream-properties=\"props,node.name=" << nodeName
-        << ",node.autoconnect=false\" "
+    oss << "pipewiresrc name=pwsrc min-buffers=2 "
         << "! audioconvert "
         << "! audio/x-raw,format=S24BE,rate=" << AES67::AUDIO_RATE
         << ",channels=" << inst.channels << " "
@@ -590,6 +611,19 @@ bool AES67Manager::CreateSendPipeline(const AES67Instance& inst) {
         return false;
     }
 
+    // Set stream-properties post-launch — inline GstStructure values in
+    // gst_parse_launch can crash gst_value_deserialize on some platforms.
+    GstElement* pwsrc = gst_bin_get_by_name(GST_BIN(pipeline), "pwsrc");
+    if (pwsrc) {
+        GstStructure* props = gst_structure_new("props",
+            "node.name", G_TYPE_STRING, nodeName.c_str(),
+            "node.autoconnect", G_TYPE_BOOLEAN, FALSE,
+            NULL);
+        g_object_set(pwsrc, "stream-properties", props, NULL);
+        gst_structure_free(props);
+        gst_object_unref(pwsrc);
+    }
+
     // Note: The pipeline uses the system clock.  PTP synchronization is
     // handled externally by ptp4l + phc2sys, which keeps the system clock
     // aligned with PTP time.  We do NOT call gst_pipeline_use_clock() here.
@@ -604,6 +638,7 @@ bool AES67Manager::CreateSendPipeline(const AES67Instance& inst) {
     GstStateChangeReturn ret = gst_element_set_state(pipeline, GST_STATE_PLAYING);
     if (ret == GST_STATE_CHANGE_FAILURE) {
         LogErr(VB_MEDIAOUT, "AES67 send pipeline [%d] failed to start\n", inst.id);
+        WarningHolder::AddWarning(44, "AES67: audio send stream failed to start");
         gst_object_unref(bus);
         gst_object_unref(pipeline);
         return false;
@@ -656,10 +691,7 @@ bool AES67Manager::CreateRecvPipeline(const AES67Instance& inst) {
         << "! rtpjitterbuffer latency=" << inst.latency << " "
         << "! rtpL24depay "
         << "! audioconvert "
-        << "! pipewiresink name=pwsink "
-        << "stream-properties=\"props,media.class=Audio/Source,"
-        << "node.name=" << nodeName << ","
-        << "node.description=" << inst.sessionName << " (Receive)\"";
+        << "! pipewiresink name=pwsink";
 
     std::string pipelineStr = oss.str();
     LogInfo(VB_MEDIAOUT, "AES67 recv pipeline [%d] %s: %s\n",
@@ -674,6 +706,22 @@ bool AES67Manager::CreateRecvPipeline(const AES67Instance& inst) {
         return false;
     }
 
+    // Set stream-properties post-launch — gst_parse_launch cannot
+    // deserialize GstStructure values containing '/' (e.g. Audio/Source)
+    // which crashes gst_value_deserialize.
+    std::string recvNodeDesc = SafeNodeName(inst.name) + "_recv";
+    GstElement* pwsink = gst_bin_get_by_name(GST_BIN(pipeline), "pwsink");
+    if (pwsink) {
+        GstStructure* props = gst_structure_new("props",
+            "media.class", G_TYPE_STRING, "Audio/Source",
+            "node.name", G_TYPE_STRING, nodeName.c_str(),
+            "node.description", G_TYPE_STRING, recvNodeDesc.c_str(),
+            NULL);
+        g_object_set(pwsink, "stream-properties", props, NULL);
+        gst_structure_free(props);
+        gst_object_unref(pwsink);
+    }
+
     // Store the bus for polling in the watchdog thread (no GLib main loop).
     GstBus* bus = gst_pipeline_get_bus(GST_PIPELINE(pipeline));
 
@@ -686,6 +734,7 @@ bool AES67Manager::CreateRecvPipeline(const AES67Instance& inst) {
     GstStateChangeReturn ret = gst_element_set_state(pipeline, GST_STATE_PLAYING);
     if (ret == GST_STATE_CHANGE_FAILURE) {
         LogErr(VB_MEDIAOUT, "AES67 recv pipeline [%d] failed to start\n", inst.id);
+        WarningHolder::AddWarning(44, "AES67: audio receive stream failed to start");
         gst_object_unref(bus);
         gst_object_unref(pipeline);
         return false;

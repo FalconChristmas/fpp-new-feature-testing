@@ -20,6 +20,7 @@ if (isset($_GET['cpu'])) {
 
     include 'common/menuHead.inc';
     ?>
+    <title><?php echo $pageTitle; ?></title>
     <link rel="stylesheet" href="css/fpp-system-design.css">
     <script>
         var uptimeInterval;
@@ -261,7 +262,6 @@ if (isset($_GET['cpu'])) {
         }
 
         function updateUptimeDisplay() {
-            uptimeSeconds++;
             var days = Math.floor(uptimeSeconds / 86400);
             var hours = Math.floor((uptimeSeconds % 86400) / 3600);
             var minutes = Math.floor((uptimeSeconds % 3600) / 60);
@@ -328,11 +328,11 @@ if (isset($_GET['cpu'])) {
                 }
 
                 // Uptime
-                if (data.uptimeTotalSeconds) {
-                    uptimeSeconds = parseInt(data.uptimeTotalSeconds);
+                if (data.systemUptimeTotalSeconds) {
+                    uptimeSeconds = parseInt(data.systemUptimeTotalSeconds);
                     updateUptimeDisplay();
                     if (!uptimeInterval) {
-                        uptimeInterval = setInterval(updateUptimeDisplay, 1000);
+                        uptimeInterval = setInterval(function () { uptimeSeconds++; updateUptimeDisplay(); }, 1000);
                     }
                 }
 
@@ -574,7 +574,7 @@ if (isset($_GET['cpu'])) {
 <body>
     <div id="bodyWrapper">
         <?php
-        $activeParentMenuItem = 'status';
+        $activeParentMenuItem = 'help';
         include 'menu.inc';
         ?>
         <div class="mainContainer">
@@ -716,7 +716,7 @@ if (isset($_GET['cpu'])) {
                                             </circle>
                                         </svg>
                                         <div class="fpp-gauge__value" id="memValue">
-                                            <?php printf('%.0f', $memTotalUsage); ?>%
+                                            <?php printf('%.0f', $memUsage); ?>%
                                             <span
                                                 class="fpp-gauge__total"><?php echo formatMemBytes($memTotal); ?></span>
                                         </div>
@@ -792,7 +792,7 @@ if (isset($_GET['cpu'])) {
                     <div class="col-md-4">
                         <div class="card compact-card">
                             <div class="card-header">
-                                <h3><i class="fas fa-clock"></i> FPP Uptime</h3>
+                                <h3><i class="fas fa-clock"></i> System Uptime</h3>
                             </div>
                             <div class="card-body uptime-display">
                                 <div class="uptime-counters">

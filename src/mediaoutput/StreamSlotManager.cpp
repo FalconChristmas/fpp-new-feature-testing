@@ -11,6 +11,7 @@
  */
 
 #include "fpp-pch.h"
+#include "log.h"
 
 #include "StreamSlotManager.h"
 #include "GStreamerOut.h"
@@ -46,11 +47,13 @@ void StreamSlotManager::SetActiveOutput(int slot, GStreamerOutput* output) {
     if (slot < 1 || slot > MAX_SLOTS) return;
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
     m_slots[slot - 1].activeOutput = output;
+#ifdef HAS_GSTREAMER
     if (output) {
         m_slots[slot - 1].mediaFilename = output->m_mediaFilename;
         LogInfo(VB_MEDIAOUT, "StreamSlotManager: slot %d active (%s)\n", slot,
                 output->m_mediaFilename.c_str());
     }
+#endif
 }
 
 GStreamerOutput* StreamSlotManager::GetActiveOutput(int slot) {
@@ -137,10 +140,10 @@ int StreamSlotManager::ActiveSlotCount() {
     return count;
 }
 
-void StreamSlotManager::StopAllSlots() {
+void StreamSlotManager::StopBackgroundSlots() {
 #ifdef HAS_GSTREAMER
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
-    for (int i = 0; i < MAX_SLOTS; i++) {
+    for (int i = 1; i < MAX_SLOTS; i++) {  // skip slot 1 (managed by playlist)
         if (m_slots[i].activeOutput) {
             LogInfo(VB_MEDIAOUT, "StreamSlotManager: stopping slot %d\n", i + 1);
             m_slots[i].activeOutput->Stop();

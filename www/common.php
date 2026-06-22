@@ -206,6 +206,65 @@ function WriteSettingToFile($settingName, $new_setting_value, $plugin = "")
     fclose($fd);
 }
 
+/**
+ * Resolve a stable ALSA card ID (e.g. "S3", "bcm2835ALSA") to its current ALSA
+ * card number by scanning /proc/asound/cards.  Returns the card number as a
+ * string, or '' if no currently-present card matches that ID.
+ *
+ * Inverse of pipewire.php's ResolveAlsaCardNumberToId().  Lives in common.php so
+ * it is available to every page/controller (e.g. backup.php) and not just the
+ * API controllers, which are auto-loaded together.
+ */
+function ResolveAlsaCardIdToNumber($cardId)
+{
+    $cardId = trim((string) $cardId);
+    if ($cardId === '') {
+        return '';
+    }
+    $cardsFile = @file_get_contents('/proc/asound/cards');
+    if ($cardsFile && preg_match_all('/^\s*(\d+)\s*\[([^\]]+)\]/m', $cardsFile, $m, PREG_SET_ORDER)) {
+        foreach ($m as $row) {
+            if (trim($row[2]) === $cardId) {
+                return $row[1];
+            }
+        }
+    }
+    return '';
+}
+
+/**
+ * Normalize a stored AudioOutput value to a stable ALSA card ID.  AudioOutput is
+ * persisted as a card ID, but legacy installs (and the brief window before
+ * FPPINIT migrates the value at boot) may still hold a numeric card index, so
+ * readers accept either form.
+ *   - empty       -> the first present card's ID (or '' if no cards)
+ *   - all-numeric -> legacy card index, resolved to that card's ID via
+ *                    /proc/asound/cardN/id ('' if the index is no longer present)
+ *   - otherwise   -> already a card ID, returned as-is
+ */
+function NormalizeAudioOutputToCardId($value)
+{
+    $value = trim((string) $value);
+    if ($value === '') {
+        $cardsFile = @file_get_contents('/proc/asound/cards');
+        if ($cardsFile && preg_match('/^\s*(\d+)\s*\[([^\]]+)\]/m', $cardsFile, $m)) {
+            return trim($m[2]);
+        }
+        return '';
+    }
+    if (ctype_digit($value)) {
+        $idFile = "/proc/asound/card{$value}/id";
+        if (file_exists($idFile)) {
+            $id = trim(@file_get_contents($idFile));
+            if ($id !== '') {
+                return $id;
+            }
+        }
+        return '';
+    }
+    return $value;
+}
+
 function DeleteSettingFromFile($settingName, $plugin = "")
 {
     global $settingsFile;
@@ -1135,15 +1194,17 @@ function " . $changedFunction . "() {
 
     echo "</select>\n";
 
-    // If we auto-selected a different value, output JavaScript to update the setting
+    // If we auto-selected a different value, output JavaScript to update the setting.
+    // Use restart=0, reboot=0 since the system was already running with the mismatched
+    // value — silently correcting it on page load should not trigger a restart/reboot banner.
     if ($shouldAutoSelect && $newValue != $currentValue) {
         echo "<script>\n";
         echo "$(document).ready(function() {\n";
         echo "    // The saved value '$currentValue' is no longer available. Auto-updating to '$newValue'.\n";
         if ($pluginName !== "") {
-            echo "    SetPluginSetting('$pluginName', '$setting', '$newValue', $restart, $reboot, true);\n";
+            echo "    SetPluginSetting('$pluginName', '$setting', '$newValue', 0, 0, true);\n";
         } else {
-            echo "    SetSetting('$setting', '$newValue', $restart, $reboot, true);\n";
+            echo "    SetSetting('$setting', '$newValue', 0, 0, true);\n";
         }
         echo "});\n";
         echo "</script>\n";
@@ -1790,7 +1851,6 @@ function get_server_memory_info()
 
 /**
  * Returns current memory usage as a percentage for about.php 
- * TODO: DELETE ME WHEN ABOUT.PHP IS REMOVED
  *
  * @deprecated Use get_server_memory_info() for detailed memory breakdown
  *             including used, free, buffer/cache, and percentages.
@@ -2199,12 +2259,64 @@ function get_remote_git_version()
 }
 
 /**
+ * Checks whether a release asset filename matches the current device's platform and architecture.
+ *
+ * @param string $name     Asset filename to test (e.g. "Pi-7.0.fppos").
+ * @param array  $settings Global FPP settings array providing OSImagePrefix and Is64Bit.
+ * @return bool True if the filename matches this device; false otherwise.
+ */
+function MatchesDeviceOSImage($name, $settings)
+{
+    if (!str_ends_with($name, ".fppos") || !isset($settings['OSImagePrefix']) || $settings['OSImagePrefix'] == "") {
+        return false;
+    }
+
+    $prefix = $settings['OSImagePrefix'];
+    $is64Bit = !empty($settings['Is64Bit']);
+
+    if ($prefix == "Pi" || $prefix == "Pi64") {
+        if (!(str_starts_with($name, "Pi-") || str_starts_with($name, "Pi64-"))) {
+            return false;
+        }
+    } else if ($prefix == "BBB" || $prefix == "BB64") {
+        if (!(str_starts_with($name, "BBB-") || str_starts_with($name, "BB64-"))) {
+            return false;
+        }
+    } else if (!str_starts_with($name, $prefix . "-")) {
+        return false;
+    }
+
+    // Match explicit architecture markers when they are present.
+    $has64Marker = preg_match('/(^|[-_])(64|64bit|aarch64|arm64)([-_.]|$)/i', $name) === 1;
+    $has32Marker = preg_match('/(^|[-_])(32|32bit|armv7|armv7l|armhf|arm32)([-_.]|$)/i', $name) === 1;
+
+    if ($has64Marker && !$is64Bit) {
+        return false;
+    }
+    if ($has32Marker && $is64Bit) {
+        return false;
+    }
+
+    // Preserve legacy behavior if marker isn't present.
+    if (!$has64Marker && !$has32Marker) {
+        if ($is64Bit && ($prefix == "Pi64" || $prefix == "BB64")) {
+            return str_starts_with($name, $prefix . "-");
+        }
+        if (!$is64Bit && ($prefix == "Pi" || $prefix == "BBB")) {
+            return str_starts_with($name, $prefix . "-");
+        }
+    }
+
+    return true;
+}
+
+/**
  * Check for FPP updates via fppstats API
  * Returns unified update status for both branch upgrades and commit updates
  * @param string $latestReleaseVersion Optional pre-fetched latest release version (from GitHub API)
  * @return array Update status with branchUpgradeAvailable, commitUpdateAvailable, etc.
  */
-function check_fppstats_updates($latestReleaseVersion = null)
+function check_fppstats_updates($latestReleaseVersion = null, $latestReleaseHasDeviceAsset = true)
 {
     global $settings;
 
@@ -2309,17 +2421,35 @@ function check_fppstats_updates($latestReleaseVersion = null)
         }
     }
 
-    if ($latestReleaseVersion && $result['branchUpgradeAvailable']) {
-        // Ensure the branch upgrade target matches
-        $latestVersionFloat = floatval(ltrim($latestReleaseVersion, 'v'));
-        $targetVersionFloat = floatval($result['branchUpgradeVersion']);
+    // Only notify about a branch upgrade once a full release actually exists.
+    // GitHub's releases/latest endpoint (the source of $latestReleaseVersion)
+    // excludes prereleases and drafts, so it is the newest version that has
+    // published artifacts. fppstats, by contrast, lists git branches, so a
+    // release branch (e.g. v10.0) shows up there before any release is cut.
+    // $latestReleaseHasDeviceAsset additionally confirms that release ships a
+    // downloadable OS image (.fppos) for this specific device.
+    if ($result['branchUpgradeAvailable']) {
+        if (preg_match('/^v?(\d+\.\d+)/', (string) $latestReleaseVersion, $rm)) {
+            $latestReleaseMajorMinor = $rm[1];
+            $latestVersionFloat = floatval($latestReleaseMajorMinor);
 
-        // Only show branch upgrade if target is at or above the official latest release
-        if ($targetVersionFloat < $latestVersionFloat) {
-            // Update to the official latest release instead
-            $result['branchUpgradeTarget'] = 'v' . $latestReleaseVersion;
-            $result['branchUpgradeVersion'] = ltrim($latestReleaseVersion, 'v');
+            if ($latestVersionFloat > $fppVersionFloat && $latestReleaseHasDeviceAsset) {
+                // Point users at the newest released version, even if a newer
+                // (release-less) branch was detected on fppstats.
+                $result['branchUpgradeTarget'] = 'v' . $latestReleaseMajorMinor;
+                $result['branchUpgradeVersion'] = $latestReleaseMajorMinor;
+            } else {
+                // Either the latest published release is not newer than what we
+                // run, or it has no OS image for this device yet, so the
+                // detected branch has nothing to upgrade to.
+                $result['branchUpgradeAvailable'] = false;
+                $result['branchUpgradeTarget'] = '';
+                $result['branchUpgradeVersion'] = '';
+            }
         }
+        // else: could not determine the latest release (e.g. offline); leave
+        // the branch-based detection as-is so notifications still work when
+        // GitHub is unreachable.
     }
 
     return $result;

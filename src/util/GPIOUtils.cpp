@@ -11,6 +11,7 @@
  */
 
 #include "fpp-pch.h"
+#include "common.h"
 
 #include <sys/mman.h>
 #include <sys/types.h>
@@ -163,7 +164,7 @@ int GPIODCapabilities::configPin(const std::string& mode,
             } catch (const std::exception& ex) {
                 std::string w = "Could not open GPIO chip " + (gpioName.empty() ? std::to_string(gpioIdx) : gpioName) +
                                 " (" + ex.what() + ")";
-                WarningHolder::AddWarning(w);
+                WarningHolder::AddWarning(51, w);
                 LogWarn(VB_GPIO, "%s\n", w.c_str());
                 return -1;
             }
@@ -180,10 +181,13 @@ int GPIODCapabilities::configPin(const std::string& mode,
             settings.set_direction(gpiod::line::direction::INPUT);
             if (mode == "gpio_pu") {
                 settings.set_bias(gpiod::line::bias::PULL_UP);
+                lastBias = gpiod::line::bias::PULL_UP;
             } else if (mode == "gpio_pd") {
                 settings.set_bias(gpiod::line::bias::PULL_DOWN);
+                lastBias = gpiod::line::bias::PULL_DOWN;
             } else {
                 settings.set_bias(gpiod::line::bias::DISABLED);
+                lastBias = gpiod::line::bias::DISABLED;
             }
         }
 
@@ -204,7 +208,7 @@ int GPIODCapabilities::configPin(const std::string& mode,
         lastRequestType = directionOut ? 1 : 0;
     } catch (const std::exception& ex) {
         std::string w = "Could not configure pin " + name + "(" + desc + ") as " + mode + " (" + ex.what() + ")";
-        WarningHolder::AddWarning(w);
+        WarningHolder::AddWarning(51, w);
         LogWarn(VB_GPIO, "%s\n", w.c_str());
         lastRequestType = 0;
     }
@@ -250,7 +254,7 @@ int GPIODCapabilities::configPin(const std::string& mode,
             lastRequestFlags = req.flags;
         } catch (const std::exception& ex) {
             std::string w = "Could not configure pin " + name + "(" + desc + ") as " + mode + " (" + ex.what() + ")";
-            WarningHolder::AddWarning(w);
+            WarningHolder::AddWarning(51, w);
             LogWarn(VB_GPIO, "%s\n", w.c_str());
             lastRequestType = 0;
             lastRequestFlags = 0;
@@ -323,7 +327,7 @@ int GPIODCapabilities::requestEventFile(bool risingEdge, bool fallingEdge) const
             } catch (const std::exception& ex) {
                 std::string w = "Could not open GPIO chip " + (gpioName.empty() ? std::to_string(gpioIdx) : gpioName) +
                                 " for event request (" + ex.what() + ")";
-                WarningHolder::AddWarning(w);
+                WarningHolder::AddWarning(51, w);
                 LogWarn(VB_GPIO, "%s\n", w.c_str());
                 return -1;
             }
@@ -337,7 +341,7 @@ int GPIODCapabilities::requestEventFile(bool risingEdge, bool fallingEdge) const
         lastDesc = desc;
 
         if (!chip) {
-            WarningHolder::AddWarning("Could not configure pin " + name + " for events: chip pointer is null");
+            WarningHolder::AddWarning(51, "Could not configure pin " + name + " for events: chip pointer is null");
             return -1;
         }
 
@@ -350,6 +354,9 @@ int GPIODCapabilities::requestEventFile(bool risingEdge, bool fallingEdge) const
             settings.set_edge_detection(gpiod::line::edge::RISING);
         } else if (fallingEdge) {
             settings.set_edge_detection(gpiod::line::edge::FALLING);
+        }
+        if (lastBias != gpiod::line::bias::UNKNOWN) {
+            settings.set_bias(lastBias);
         }
         std::string consumer = lastDesc.empty() ? PROCESS_NAME : lastDesc;
 
@@ -365,7 +372,7 @@ int GPIODCapabilities::requestEventFile(bool risingEdge, bool fallingEdge) const
 
         fd = request->fd();
         if (fd < 0) {
-            WarningHolder::AddWarning("Could not get event file descriptor for pin " + name);
+            WarningHolder::AddWarning(51, "Could not get event file descriptor for pin " + name);
             request = nullptr;
         }
     } catch (const std::exception& ex) {
@@ -375,6 +382,9 @@ int GPIODCapabilities::requestEventFile(bool risingEdge, bool fallingEdge) const
         try {
             gpiod::line_settings settings;
             settings.set_direction(gpiod::line::direction::INPUT);
+            if (lastBias != gpiod::line::bias::UNKNOWN) {
+                settings.set_bias(lastBias);
+            }
             std::string consumer = lastDesc.empty() ? PROCESS_NAME : lastDesc;
             gpiod::request_builder builder = chip->prepare_request();
             builder.add_line_settings(gpio, settings);
@@ -391,6 +401,7 @@ int GPIODCapabilities::requestEventFile(bool risingEdge, bool fallingEdge) const
     gpiod::line_request req;
     req.consumer = lastDesc.empty() ? PROCESS_NAME : lastDesc;
     req.request_type = lastRequestType;
+    req.flags = lastRequestFlags;
     if (risingEdge && fallingEdge) {
         req.request_type |= gpiod::line_request::EVENT_BOTH_EDGES;
     } else if (risingEdge) {
@@ -406,23 +417,23 @@ int GPIODCapabilities::requestEventFile(bool risingEdge, bool fallingEdge) const
         line.request(req, 0);
     } catch (const std::exception& ex) {
         if (!wasRequested) {
-            WarningHolder::AddWarning("Could not configure pin " + name + " for events (" + ex.what() + ") for edges Rising:" +
+            WarningHolder::AddWarning(51, "Could not configure pin " + name + " for events (" + ex.what() + ") for edges Rising:" +
                                       std::to_string(risingEdge) + "   Falling:" + std::to_string(fallingEdge));
         }
     }
     if (line.is_requested()) {
         fd = line.event_get_fd();
         if (fd < 0) {
-            WarningHolder::AddWarning("Could not get event file descriptor for pin " + name);
+            WarningHolder::AddWarning(51, "Could not get event file descriptor for pin " + name);
         }
     } else if (wasRequested) {
         req.request_type = lastRequestType;
         line.request(req, 0);
         if (!line.is_requested()) {
-            WarningHolder::AddWarning("Could not re-request pin " + name + " after failing to request events");
+            WarningHolder::AddWarning(51, "Could not re-request pin " + name + " after failing to request events");
         }
     } else {
-        WarningHolder::AddWarning("Could not request event for pin " + name);
+        WarningHolder::AddWarning(51, "Could not request event for pin " + name);
     }
 #endif
 #endif
@@ -579,6 +590,14 @@ const PinCapabilities& PinCapabilities::getPinByName(const std::string& n) {
             return a;
         }
     }
+    // PIN_PROVIDER is only set once InitGPIO() runs, which must wait until after
+    // cape detection so cape GPIO expanders are registered. Anything that looks
+    // up a pin before then (e.g. fppoled's early display init probing the i2c1
+    // fallback) gets the null pin rather than dereferencing a null provider --
+    // configPin() etc. on it are no-ops, so the lookup is safely skipped.
+    if (PIN_PROVIDER == nullptr) {
+        return NULL_PIN_INSTANCE;
+    }
     return PIN_PROVIDER->getPinByName(n);
 }
 const PinCapabilities& PinCapabilities::getPinByGPIO(int chip, int gpio) {
@@ -587,9 +606,15 @@ const PinCapabilities& PinCapabilities::getPinByGPIO(int chip, int gpio) {
             return a;
         }
     }
+    if (PIN_PROVIDER == nullptr) {
+        return NULL_PIN_INSTANCE;
+    }
     return PIN_PROVIDER->getPinByGPIO(chip, gpio);
 }
 const PinCapabilities& PinCapabilities::getPinByUART(const std::string& n) {
+    if (PIN_PROVIDER == nullptr) {
+        return NULL_PIN_INSTANCE;
+    }
     return PIN_PROVIDER->getPinByUART(n);
 }
 

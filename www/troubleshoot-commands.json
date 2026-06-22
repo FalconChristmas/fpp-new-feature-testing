@@ -203,6 +203,14 @@
                 "all"
             ],
             "commands": {
+                "USBDeviceList": {
+                    "title": "USB Device List",
+                    "description": "",
+                    "cmd": "lsusb",
+                    "platforms": [
+                        "all"
+                    ]
+                },
                 "USBDeviceTree": {
                     "title": "USB Device Tree",
                     "description": "",

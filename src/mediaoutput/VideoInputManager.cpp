@@ -11,6 +11,7 @@
  */
 
 #include "fpp-pch.h"
+#include <cmath>
 
 #include "VideoInputManager.h"
 #include "VideoOutputManager.h"
@@ -91,6 +92,11 @@ void VideoInputManager::Reload() {
 }
 
 void VideoInputManager::Shutdown() {
+    // Idempotent: main() calls this at shutdown and ~VideoInputManager() calls
+    // it again at static-destruction time. Run the teardown only once.
+    if (m_shutdownDone.exchange(true)) {
+        return;
+    }
     std::lock_guard<std::mutex> lock(m_mutex);
     StopAllSources();
     m_sources.clear();
@@ -254,12 +260,14 @@ bool VideoInputManager::StartSource(SourceInfo& source) {
     } else if (source.type == "v4l2src") {
         if (source.device.empty()) {
             LogWarn(VB_MEDIAOUT, "VideoInputManager: v4l2src '%s' has no device path\n", source.name.c_str());
+            WarningHolder::AddWarning(56, "Video input '" + source.name + "' has no capture device path configured");
             return false;
         }
         srcElement = "v4l2src device=" + source.device;
     } else if (source.type == "rtspsrc") {
         if (source.uri.empty()) {
             LogWarn(VB_MEDIAOUT, "VideoInputManager: rtspsrc '%s' has no URI\n", source.name.c_str());
+            WarningHolder::AddWarning(56, "Video input '" + source.name + "' (RTSP) has no URI configured");
             return false;
         }
         // rtspsrc → decodebin handles codec negotiation (H.264, H.265, MJPEG, etc.)
@@ -270,6 +278,7 @@ bool VideoInputManager::StartSource(SourceInfo& source) {
     } else if (source.type == "urisrc") {
         if (source.uri.empty()) {
             LogWarn(VB_MEDIAOUT, "VideoInputManager: urisrc '%s' has no URI\n", source.name.c_str());
+            WarningHolder::AddWarning(56, "Video input '" + source.name + "' has no URI configured");
             return false;
         }
         std::string resolvedUri = source.uri;
@@ -401,6 +410,7 @@ bool VideoInputManager::StartSource(SourceInfo& source) {
         useDecodebin = true;
     } else {
         LogWarn(VB_MEDIAOUT, "VideoInputManager: Unknown source type '%s'\n", source.type.c_str());
+        WarningHolder::AddWarning(56, "Video input '" + source.name + "' has unknown source type '" + source.type + "'");
         return false;
     }
 
@@ -502,6 +512,7 @@ bool VideoInputManager::StartSource(SourceInfo& source) {
         if (ret == GST_STATE_CHANGE_FAILURE) {
             if (!shutdownFlag->load()) {
                 LogWarn(VB_MEDIAOUT, "VideoInputManager: Source '%s' failed to start\n", sourceName.c_str());
+                WarningHolder::AddWarning(56, "Video input '" + sourceName + "' failed to start");
             }
             *runningFlag = false;
             return;
@@ -592,6 +603,7 @@ bool VideoInputManager::StartSource(SourceInfo& source) {
     return true;
 #else
     LogWarn(VB_MEDIAOUT, "VideoInputManager: GStreamer not available\n");
+    WarningHolder::AddWarning(56, "Video input requires GStreamer, which is not available on this device");
     return false;
 #endif
 }
@@ -673,6 +685,7 @@ bool VideoInputManager::StartSourceWithAudio(SourceInfo& source) {
     if (videoUrl.empty()) {
         LogWarn(VB_MEDIAOUT, "VideoInputManager: Failed to resolve video URL for '%s'\n",
                 source.name.c_str());
+        WarningHolder::AddWarning(56, "Video input '" + source.name + "': could not resolve the video URL");
         return false;
     }
 
@@ -891,6 +904,7 @@ bool VideoInputManager::StartSourceWithAudio(SourceInfo& source) {
             if (!shutdownFlag->load()) {
                 LogWarn(VB_MEDIAOUT, "VideoInputManager: Source '%s' failed to start\n",
                         sourceName.c_str());
+                WarningHolder::AddWarning(56, "Video input '" + sourceName + "' failed to start");
             }
             *runningFlag = false;
             return;
@@ -981,6 +995,7 @@ bool VideoInputManager::StartSourceWithAudio(SourceInfo& source) {
     return true;
 #else
     LogWarn(VB_MEDIAOUT, "VideoInputManager: GStreamer not available\n");
+    WarningHolder::AddWarning(56, "Video input requires GStreamer, which is not available on this device");
     return false;
 #endif
 }

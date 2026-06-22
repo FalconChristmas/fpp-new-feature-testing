@@ -26,13 +26,20 @@
 #include "util/TmpFileGPIO.h"
 #define PLAT_GPIO_CLASS TmpFilePinProvider
 #endif
+#include <map>
 #include <thread>
 
 class WarningHolder {
     static void AddWarning(const std::string& w);
+    // Mirror the real Warnings.h signature (incl. the defaulted data map) so
+    // GPIOUtils.o — compiled against the real header — links against this stub.
+    static void AddWarning(int id, const std::string& w, const std::map<std::string, std::string>& data = {});
 };
 
 void WarningHolder::AddWarning(const std::string& w) {
+    printf("Warning: %s\n", w.c_str());
+}
+void WarningHolder::AddWarning(int id, const std::string& w, const std::map<std::string, std::string>& data) {
     printf("Warning: %s\n", w.c_str());
 }
 
@@ -69,7 +76,7 @@ int main(int argc, char* argv[]) {
                 count++;
             }
             if (FileExists("/home/fpp/media/tmp/cape-image.xbm")) {
-                CopyFileContents("/home/fpp/media/tmp/cape-image.xbm", "/tmp/cape-image.xbm");
+                CopyFileContents("/home/fpp/media/tmp/cape-image.xbm", "/var/tmp/cape-image.xbm");
             }
             return 0;
         }

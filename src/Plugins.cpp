@@ -379,10 +379,23 @@ PluginManager::~PluginManager() {
     Cleanup();
 }
 void PluginManager::Cleanup() {
+    // Give API-providing plugins their unregister callback before destroying
+    // them: that is where they remove (and may delete) the Command objects
+    // they added to CommandManager. Without this, those commands are still
+    // registered when CommandManager::Cleanup() bulk-deletes everything it
+    // holds, and a plugin destructor that also deletes them double-frees.
+    unregisterApis();
+    mAPIProviderPlugins.clear();
     while (!mPlugins.empty()) {
         delete mPlugins.back();
         mPlugins.pop_back();
     }
+    // Delete any commands that plugins registered but did not remove in
+    // unregisterApis(). Those commands have vtables in the plugin library.
+    // CommandManager::Cleanup() must run before dlclose() so that the virtual
+    // destructor dispatch doesn't hit unmapped memory. The call is idempotent
+    // (guarded by an atomic flag), so the subsequent call in main() is a no-op.
+    CommandManager::INSTANCE.Cleanup();
     for (auto& a : mShlibHandles) {
         dlclose(a);
     }
@@ -525,12 +538,14 @@ FPPPlugins::Plugin* PluginManager::loadSHLIBPlugin(const std::string& shlibName)
     *(void**)(&vfptr) = dlsym(handle, "fpp_plugin_api_version");
     if (vfptr == nullptr) {
         LogErr(VB_PLUGIN, "Plugin %s was compiled against an older FPP API and is not compatible. Please update and rebuild the plugin.\n", shlibName.c_str());
+        WarningHolder::AddWarning(5, "Could not load plugin " + shlibName + " (built against an older FPP API - rebuild required)");
         dlclose(handle);
         return nullptr;
     }
     int pluginVersion = vfptr();
     if (pluginVersion != FPP_PLUGIN_API_VERSION) {
         LogErr(VB_PLUGIN, "Plugin %s API version %d does not match FPP API version %d. Please update and rebuild the plugin.\n", shlibName.c_str(), pluginVersion, FPP_PLUGIN_API_VERSION);
+        WarningHolder::AddWarning(5, "Could not load plugin " + shlibName + " (API version mismatch - rebuild required)");
         dlclose(handle);
         return nullptr;
     }
@@ -539,12 +554,14 @@ FPPPlugins::Plugin* PluginManager::loadSHLIBPlugin(const std::string& shlibName)
     *(void**)(&fptr) = dlsym(handle, "createPlugin");
     if (fptr == nullptr) {
         LogErr(VB_PLUGIN, "Failed to find  createPlugin() function in shlib %s\n", shlibName.c_str());
+        WarningHolder::AddWarning(5, "Could not load plugin " + shlibName + " (missing createPlugin entry point)");
         dlclose(handle);
         return nullptr;
     }
     FPPPlugins::Plugin* p = fptr();
     if (p == nullptr) {
         LogErr(VB_PLUGIN, "Failed to create plugin from shlib %s\n", shlibName.c_str());
+        WarningHolder::AddWarning(5, "Could not load plugin " + shlibName + " (createPlugin returned no plugin)");
         dlclose(handle);
         return nullptr;
     }

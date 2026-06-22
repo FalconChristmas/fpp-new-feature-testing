@@ -137,6 +137,14 @@ else
     echo "    WARNING: /opt/fpp/etc/wireplumber/wireplumber.conf.d not found in repo!"
 fi
 
+# FPP WirePlumber Lua hooks (static, e.g. the combine-stream default-target
+# fallback blocker referenced by 60-fpp-block-combine-fallback.conf).
+if [ -d /opt/fpp/etc/wireplumber/scripts ]; then
+    mkdir -p /usr/share/wireplumber/scripts
+    cp -a /opt/fpp/etc/wireplumber/scripts/. /usr/share/wireplumber/scripts/
+    echo "    Deployed FPP WirePlumber Lua hooks"
+fi
+
 # Remove old WirePlumber 0.4 Lua configs (not supported by WirePlumber 0.5+)
 if [ -d /etc/wireplumber/main.lua.d ]; then
     echo "    Removing old WirePlumber 0.4 Lua configs..."
@@ -162,10 +170,13 @@ if [ -f "/opt/fpp/etc/systemd/fppd.service" ]; then
 fi
 
 systemctl daemon-reload
-systemctl enable fpp-pipewire.service
-systemctl enable fpp-wireplumber.service
-systemctl enable fpp-pipewire-pulse.service
-echo "    Services enabled."
+# The PipeWire services are intentionally left DISABLED: FPPINIT's setupAudio
+# starts them on demand (from its audio thread) once it has written/validated the
+# audio config, so PipeWire reads the correct graph on its first and only start
+# instead of coming up empty at sound.target and needing a restart. Disable here
+# to undo any enablement from a prior install.
+systemctl disable fpp-pipewire.service fpp-wireplumber.service fpp-pipewire-pulse.service 2>/dev/null || true
+echo "    Services installed (left disabled; started on demand by setupAudio)."
 
 # --- 6. Mask user-session PipeWire services ---
 echo ""

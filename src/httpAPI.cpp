@@ -18,6 +18,7 @@
 #undef LOG_DEBUG
 
 #include "fpp-pch.h"
+#include <fcntl.h>
 
 // Defined in fppd.cpp; setting it to 0 breaks the main loop and triggers
 // FPP's normal shutdown sequence, same as SIGQUIT or a graceful stop.
@@ -64,6 +65,7 @@ extern volatile int runMainFPPDLoop;
 #include "channeltester/ChannelTester.h"
 #include "commands/Commands.h"
 #include "mediaoutput/AES67Manager.h"
+#include "mediaoutput/OpusRTPManager.h"
 #include "mediaoutput/MediaOutputBase.h"
 #include "mediaoutput/MediaOutputStatus.h"
 #include "mediaoutput/StreamSlotManager.h"
@@ -81,7 +83,7 @@ static bool piPowerBad = false;
  Build a Status JSON String
 */
 void GetCurrentFPPDStatus(Json::Value& result) {
-    static std::string UUID = getSetting("SystemUUID");
+    std::string UUID = getSetting("SystemUUID");
     static std::string host_name = getSetting("HostName");
     static std::string host_description = getSetting("HostDescription");
     static std::string fpp_version = getFPPVersion();
@@ -258,10 +260,31 @@ APIServer::APIServer() {
  */
 APIServer::~APIServer() {
     drogon::app().quit();
-    // Release our reference. In-flight drogon requests captured m_pr by value
-    // (shared_ptr), so the PlayerResource stays alive until the last request
-    // completes — no use-after-free regardless of when drogon threads finish.
+    // Join the server thread so Drogon is fully stopped before we return.
+    // PluginManager::Cleanup() (called from main() after MainLoop() exits)
+    // will dlclose() plugin libraries; if Drogon IO threads are still running
+    // at that point they may execute or release plugin handler lambdas whose
+    // code is in those libraries -> SEGV_MAPERR. Joining here ensures all
+    // Drogon threads have exited before any dlclose() can happen.
+    if (m_serverThread && m_serverThread->joinable()) {
+        m_serverThread->join();
+    }
+    delete m_serverThread;
+    m_serverThread = nullptr;
     m_pr.reset();
+}
+
+// drogon's registerHandler/registerHandlerViaRegex take the callable by
+// rvalue reference and move out of it, so a handler that is registered on
+// more than one route must be copied for each registration. Re-using the
+// same variable would register a moved-from closure: harmless for the
+// captureless lambdas below, but for capturing ones (e.g. handleFppd's
+// shared_ptr) the later route ends up dereferencing a nulled capture and
+// crashes. Every registration below goes through this explicit copy so
+// adding a capture to any handler stays safe.
+template<typename T>
+static T copyHandler(const T& handler) {
+    return handler;
 }
 
 /*
@@ -294,15 +317,15 @@ void APIServer::Init(void) {
     };
     // Register /fppd exact match first; the catch-all regex is registered after
     // the more specific /fppd/* routes below so they take priority.
-    app.registerHandler("/fppd", handleFppd, {drogon::Get, drogon::Post, drogon::Put, drogon::Delete, drogon::Head});
+    app.registerHandler("/fppd", copyHandler(handleFppd), {drogon::Get, drogon::Post, drogon::Put, drogon::Delete, drogon::Head});
 
     // OutputMonitor (/fppd/ports/*)
     auto handlePorts = [](const HttpRequestPtr& req,
                           std::function<void(const HttpResponsePtr&)>&& callback) {
         callback(OutputMonitor::INSTANCE.render_GET(req));
     };
-    app.registerHandlerViaRegex("/fppd/ports", handlePorts, {drogon::Get, drogon::Head});
-    app.registerHandlerViaRegex("/fppd/ports/.*", handlePorts, {drogon::Get, drogon::Head});
+    app.registerHandlerViaRegex("/fppd/ports", copyHandler(handlePorts), {drogon::Get, drogon::Head});
+    app.registerHandlerViaRegex("/fppd/ports/.*", copyHandler(handlePorts), {drogon::Get, drogon::Head});
 
     // ChannelTester (/fppd/testing/*)
     auto handleTesting = [](const HttpRequestPtr& req,
@@ -316,7 +339,7 @@ void APIServer::Init(void) {
             resp = makeStringResponse("Method Not Allowed", 405);
         callback(resp);
     };
-    app.registerHandlerViaRegex("/fppd/testing(/.*)?", handleTesting, {drogon::Get, drogon::Post, drogon::Head});
+    app.registerHandlerViaRegex("/fppd/testing(/.*)?", copyHandler(handleTesting), {drogon::Get, drogon::Post, drogon::Head});
 
 #ifdef HAS_AES67_GSTREAMER
     // AES67 status/test endpoint
@@ -324,13 +347,22 @@ void APIServer::Init(void) {
                           std::function<void(const HttpResponsePtr&)>&& callback) {
         callback(AES67Manager::INSTANCE.render_GET(req));
     };
-    app.registerHandler("/aes67", handleAES67, {drogon::Get, drogon::Head});
-    app.registerHandlerViaRegex("/aes67/.*", handleAES67, {drogon::Get, drogon::Head});
+    app.registerHandler("/aes67", copyHandler(handleAES67), {drogon::Get, drogon::Head});
+    app.registerHandlerViaRegex("/aes67/.*", copyHandler(handleAES67), {drogon::Get, drogon::Head});
+#endif
+
+#ifdef HAS_OPUS_RTP_GSTREAMER
+    auto handleOpusRTP = [](const HttpRequestPtr& req,
+                            std::function<void(const HttpResponsePtr&)>&& callback) {
+        callback(OpusRTPManager::INSTANCE.render_GET(req));
+    };
+    app.registerHandler("/opusrtp", copyHandler(handleOpusRTP), {drogon::Get, drogon::Head});
+    app.registerHandlerViaRegex("/opusrtp/.*", copyHandler(handleOpusRTP), {drogon::Get, drogon::Head});
 #endif
 
     // PlayerResource catch-all for all other /fppd/* paths (registered AFTER
     // specific /fppd/ports and /fppd/testing routes so they match first)
-    app.registerHandlerViaRegex("/fppd/.*", handleFppd, {drogon::Get, drogon::Post, drogon::Put, drogon::Delete, drogon::Head});
+    app.registerHandlerViaRegex("/fppd/.*", copyHandler(handleFppd), {drogon::Get, drogon::Post, drogon::Put, drogon::Delete, drogon::Head});
 
     // PixelOverlayManager (/models/*, /overlays/*)
     auto handleModels = [](const HttpRequestPtr& req,
@@ -346,10 +378,10 @@ void APIServer::Init(void) {
             resp = makeStringResponse("Method Not Allowed", 405);
         callback(resp);
     };
-    app.registerHandler("/models", handleModels, {drogon::Get, drogon::Post, drogon::Put, drogon::Head});
-    app.registerHandlerViaRegex("/models/.*", handleModels, {drogon::Get, drogon::Post, drogon::Put, drogon::Head});
-    app.registerHandler("/overlays", handleModels, {drogon::Get, drogon::Post, drogon::Put, drogon::Head});
-    app.registerHandlerViaRegex("/overlays/.*", handleModels, {drogon::Get, drogon::Post, drogon::Put, drogon::Head});
+    app.registerHandler("/models", copyHandler(handleModels), {drogon::Get, drogon::Post, drogon::Put, drogon::Head});
+    app.registerHandlerViaRegex("/models/.*", copyHandler(handleModels), {drogon::Get, drogon::Post, drogon::Put, drogon::Head});
+    app.registerHandler("/overlays", copyHandler(handleModels), {drogon::Get, drogon::Post, drogon::Put, drogon::Head});
+    app.registerHandlerViaRegex("/overlays/.*", copyHandler(handleModels), {drogon::Get, drogon::Post, drogon::Put, drogon::Head});
 
     // CommandManager (/command/*, /commands/*, /commandPresets/*)
     auto handleCommands = [](const HttpRequestPtr& req,
@@ -363,12 +395,12 @@ void APIServer::Init(void) {
             resp = makeStringResponse("Method Not Allowed", 405);
         callback(resp);
     };
-    app.registerHandler("/command", handleCommands, {drogon::Get, drogon::Post, drogon::Head});
-    app.registerHandlerViaRegex("/command/.*", handleCommands, {drogon::Get, drogon::Post, drogon::Head});
-    app.registerHandler("/commands", handleCommands, {drogon::Get, drogon::Post, drogon::Head});
-    app.registerHandlerViaRegex("/commands/.*", handleCommands, {drogon::Get, drogon::Post, drogon::Head});
-    app.registerHandler("/commandPresets", handleCommands, {drogon::Get, drogon::Post, drogon::Head});
-    app.registerHandlerViaRegex("/commandPresets/.*", handleCommands, {drogon::Get, drogon::Post, drogon::Head});
+    app.registerHandler("/command", copyHandler(handleCommands), {drogon::Get, drogon::Post, drogon::Head});
+    app.registerHandlerViaRegex("/command/.*", copyHandler(handleCommands), {drogon::Get, drogon::Post, drogon::Head});
+    app.registerHandler("/commands", copyHandler(handleCommands), {drogon::Get, drogon::Post, drogon::Head});
+    app.registerHandlerViaRegex("/commands/.*", copyHandler(handleCommands), {drogon::Get, drogon::Post, drogon::Head});
+    app.registerHandler("/commandPresets", copyHandler(handleCommands), {drogon::Get, drogon::Post, drogon::Head});
+    app.registerHandlerViaRegex("/commandPresets/.*", copyHandler(handleCommands), {drogon::Get, drogon::Post, drogon::Head});
 
     // GPIOManager (/gpio/*)
     auto handleGpio = [](const HttpRequestPtr& req,
@@ -382,8 +414,8 @@ void APIServer::Init(void) {
             resp = makeStringResponse("Method Not Allowed", 405);
         callback(resp);
     };
-    app.registerHandler("/gpio", handleGpio, {drogon::Get, drogon::Post, drogon::Head});
-    app.registerHandlerViaRegex("/gpio/.*", handleGpio, {drogon::Get, drogon::Post, drogon::Head});
+    app.registerHandler("/gpio", copyHandler(handleGpio), {drogon::Get, drogon::Post, drogon::Head});
+    app.registerHandlerViaRegex("/gpio/.*", copyHandler(handleGpio), {drogon::Get, drogon::Post, drogon::Head});
 
     // Player (/player/*)
     auto handlePlayer = [](const HttpRequestPtr& req,
@@ -399,8 +431,8 @@ void APIServer::Init(void) {
             resp = makeStringResponse("Method Not Allowed", 405);
         callback(resp);
     };
-    app.registerHandler("/player", handlePlayer, {drogon::Get, drogon::Post, drogon::Put, drogon::Head});
-    app.registerHandlerViaRegex("/player/.*", handlePlayer, {drogon::Get, drogon::Post, drogon::Put, drogon::Head});
+    app.registerHandler("/player", copyHandler(handlePlayer), {drogon::Get, drogon::Post, drogon::Put, drogon::Head});
+    app.registerHandlerViaRegex("/player/.*", copyHandler(handlePlayer), {drogon::Get, drogon::Post, drogon::Put, drogon::Head});
 
     // Let plugins register their own routes
     PluginManager::INSTANCE.registerApis();
@@ -426,9 +458,10 @@ void APIServer::Init(void) {
     m_serverThread = new std::thread([]() {
         drogon::app().run();
     });
-    // Detach so that if exit() is called unexpectedly (e.g., from e131bridge
-    // socket failures), the std::thread destructor won't call std::terminate()
-    m_serverThread->detach();
+    // Do NOT detach: ~APIServer() joins this thread after quit() so Drogon is
+    // fully stopped before PluginManager::Cleanup() calls dlclose() on plugin
+    // libraries. Plugin route handlers are lambdas with code in those libraries;
+    // Drogon IO threads running after dlclose() -> SEGV_MAPERR on the vtable.
 }
 
 /*
@@ -472,6 +505,134 @@ PlayerResource::~PlayerResource() {
 
 /*
  *
+ */
+// --------------------------------------------------------------------------
+// OpenAPI docs for the /fppd/* GET endpoints handled below.
+// These @route docblocks are parsed by www/api/tools/generate_openapi.py; the
+// fppd daemon serves them on port 32322 and Apache proxies them under /api/*.
+// --------------------------------------------------------------------------
+
+/**
+ * List the effects currently running on the player.
+ *
+ * @route GET /api/fppd/effects
+ * @response 200 Object with a `runningEffects` array.
+ */
+
+/**
+ * Get the current fppd logging configuration (log level and enabled channels).
+ *
+ * @route GET /api/fppd/log
+ * @response 200 Current log settings.
+ */
+
+/**
+ * Get the full current player status (playlist, sequence, time, mode, etc.).
+ *
+ * @route GET /api/fppd/status
+ * @response 200 Current player status JSON.
+ */
+
+/**
+ * List the messages for all currently active warnings.
+ *
+ * @route GET /api/fppd/warnings
+ * @response 200 Array of warning message strings.
+ * ```json
+ * ["Low disk space", "No network connection"]
+ * ```
+ */
+
+/**
+ * List all currently active warnings as full objects (message plus metadata).
+ *
+ * @route GET /api/fppd/warnings_full
+ * @response 200 Array of warning objects.
+ */
+
+/**
+ * Get the number of E1.31/sACN bytes received per universe.
+ *
+ * @route GET /api/fppd/e131stats
+ * @response 200 E1.31 receive statistics.
+ */
+
+/**
+ * List the MultiSync systems discovered on the network.
+ *
+ * @route GET /api/fppd/multiSyncSystems
+ * @param int localOnly Set to 1 to return only the local system.
+ * @response 200 MultiSync systems.
+ */
+
+/**
+ * Get MultiSync packet statistics.
+ *
+ * @route GET /api/fppd/multiSyncStats
+ * @param int reset Set to 1 to reset the statistics after reading them.
+ * @response 200 MultiSync statistics.
+ */
+
+/**
+ * List the playlists that are currently running.
+ *
+ * @route GET /api/fppd/playlists
+ * @response 200 Currently running playlists.
+ */
+
+/**
+ * Get the last-modified time of the running playlist file.
+ *
+ * @route GET /api/fppd/playlist/filetime
+ * @response 200 Playlist file time.
+ */
+
+/**
+ * Get the configuration of the running playlist.
+ *
+ * @route GET /api/fppd/playlist/config
+ * @response 200 Playlist configuration.
+ */
+
+/**
+ * Get the currently loaded schedule.
+ *
+ * @route GET /api/fppd/schedule
+ * @response 200 Object with a `schedule` member.
+ */
+
+/**
+ * Get FPP version information.
+ *
+ * @route GET /api/fppd/version
+ * @response 200 Version details.
+ * ```json
+ * {"version": "9.0", "majorVersion": 9, "minorVersion": 0, "branch": "master", "fppdAPI": 4, "Status": "OK"}
+ * ```
+ */
+
+/**
+ * Get (or set) the master output volume.
+ *
+ * @route GET /api/fppd/volume
+ * @param int set New volume (0-100) to apply before returning.
+ * @param boolean simple Return the volume as a bare text/plain integer instead of JSON.
+ * @response 200 Object with a `volume` member (0-100).
+ */
+
+/**
+ * Get the list of running sequences.
+ *
+ * @route GET /api/fppd/sequence
+ * @response 200 Running sequences.
+ */
+
+/**
+ * Dump the cached MQTT messages.
+ *
+ * @route GET /api/fppd/mqtt/cache
+ * @response 200 Cached MQTT messages.
+ * @response 400 MQTT is not initialized.
  */
 HttpResponsePtr PlayerResource::render_GET(const HttpRequestPtr& req) {
     LogRequest(req);
@@ -591,6 +752,184 @@ HttpResponsePtr PlayerResource::render_GET(const HttpRequestPtr& req) {
 
 /*
  *
+ */
+// --------------------------------------------------------------------------
+// OpenAPI docs for the /fppd/* POST endpoints handled below.
+// --------------------------------------------------------------------------
+
+/**
+ * Start (or update) a named overlay effect on the player.
+ *
+ * @route POST /api/fppd/effects/{name}
+ * @response 200 Effect started.
+ */
+
+/**
+ * Re-read the Falcon hardware (e.g. cape/receiver) configuration.
+ *
+ * @route POST /api/fppd/falcon/hardware
+ * @response 200 Hardware refreshed.
+ */
+
+/**
+ * Set an external GPIO input state.
+ *
+ * @route POST /api/fppd/gpio/ext
+ * @response 200 GPIO state updated.
+ */
+
+/**
+ * Set the logging level for a specific log channel.
+ *
+ * @route POST /api/fppd/log/level/{level}
+ * @response 200 Log level updated.
+ */
+
+/**
+ * Apply a new channel-output configuration.
+ *
+ * @route POST /api/fppd/outputs
+ * @response 200 Outputs updated.
+ */
+
+/**
+ * Remap channel outputs.
+ *
+ * @route POST /api/fppd/outputs/remap
+ * @response 200 Outputs remapped.
+ */
+
+/**
+ * Stop all running playlists.
+ *
+ * @route POST /api/fppd/playlists/stop
+ * @response 200 All playlists stopped.
+ */
+
+/**
+ * Start a playlist by name.
+ *
+ * @route POST /api/fppd/playlists/{name}/start
+ * @response 200 Playlist started.
+ */
+
+/**
+ * Stop a running playlist by name.
+ *
+ * @route POST /api/fppd/playlists/{name}/stop
+ * @response 200 Playlist stopped.
+ */
+
+/**
+ * Skip to the next item in a running playlist.
+ *
+ * @route POST /api/fppd/playlists/{name}/nextItem
+ * @response 200 Advanced to next item.
+ */
+
+/**
+ * Skip to the previous item in a running playlist.
+ *
+ * @route POST /api/fppd/playlists/{name}/prevItem
+ * @response 200 Moved to previous item.
+ */
+
+/**
+ * Restart the current item in a running playlist.
+ *
+ * @route POST /api/fppd/playlists/{name}/restartItem
+ * @response 200 Current item restarted.
+ */
+
+/**
+ * Jump to a named section (mainPlaylist, leadIn, leadOut) of a playlist.
+ *
+ * @route POST /api/fppd/playlists/{name}/section/{section}
+ * @response 200 Jumped to section.
+ */
+
+/**
+ * Jump to a specific item index in a playlist.
+ *
+ * @route POST /api/fppd/playlists/{name}/item/{item}
+ * @response 200 Jumped to item.
+ */
+
+/**
+ * Replace the active schedule.
+ *
+ * @route POST /api/fppd/schedule
+ * @response 200 Schedule updated.
+ */
+
+/**
+ * Set the master output volume (0-100).
+ *
+ * @route POST /api/fppd/volume/{volume}
+ * @response 200 Object with the new `volume`.
+ */
+
+/**
+ * Start playing a sequence by name.
+ *
+ * @route POST /api/fppd/sequences/{name}/start
+ * @response 200 Sequence started.
+ */
+
+/**
+ * Stop a running sequence by name.
+ *
+ * @route POST /api/fppd/sequences/{name}/stop
+ * @response 200 Sequence stopped.
+ */
+
+/**
+ * Toggle pause on a running sequence (append /0 to resume, /1 to pause).
+ *
+ * @route POST /api/fppd/sequences/{name}/pause
+ * @response 200 Pause state toggled.
+ */
+
+/**
+ * Step a paused sequence forward (optionally by /{frames}).
+ *
+ * @route POST /api/fppd/sequences/{name}/step
+ * @response 200 Sequence stepped forward.
+ */
+
+/**
+ * Step a paused sequence backward (optionally by /{frames}).
+ *
+ * @route POST /api/fppd/sequences/{name}/back
+ * @response 200 Sequence stepped backward.
+ */
+
+/**
+ * Reload all settings from disk.
+ *
+ * @route POST /api/fppd/settings/reload
+ * @response 200 Settings reloaded.
+ */
+
+/**
+ * Reload a single setting from disk.
+ *
+ * @route POST /api/fppd/settings/reload/{setting}
+ * @response 200 Setting reloaded.
+ */
+
+/**
+ * Restart the fppd daemon.
+ *
+ * @route POST /api/fppd/restart
+ * @response 200 fppd restarting.
+ */
+
+/**
+ * Shut down the fppd daemon.
+ *
+ * @route POST /api/fppd/shutdown
+ * @response 200 fppd shutting down.
  */
 HttpResponsePtr PlayerResource::render_POST(const HttpRequestPtr& req) {
     LogRequest(req);
@@ -728,6 +1067,12 @@ HttpResponsePtr PlayerResource::render_POST(const HttpRequestPtr& req) {
 /*
  *
  */
+/**
+ * Reset the E1.31/sACN receive statistics.
+ *
+ * @route DELETE /api/fppd/e131stats
+ * @response 200 Statistics cleared.
+ */
 HttpResponsePtr PlayerResource::render_DELETE(const HttpRequestPtr& req) {
     LogRequest(req);
 
@@ -771,6 +1116,12 @@ HttpResponsePtr PlayerResource::render_DELETE(const HttpRequestPtr& req) {
 
 /*
  *
+ */
+/**
+ * Update the runtime settings of a running playlist.
+ *
+ * @route PUT /api/fppd/playlists/{name}/settings
+ * @response 200 Playlist settings updated.
  */
 HttpResponsePtr PlayerResource::render_PUT(const HttpRequestPtr& req) {
     LogRequest(req);
@@ -1058,7 +1409,7 @@ void PlayerResource::periodicWork() {
             if (piPowerBad) {
                 piPowerWarningCount++;
                 if (piPowerWarningCount > 5 && !piPowerWarningAdded) {
-                    WarningHolder::AddWarning("Raspberry Pi Voltage Too Low");
+                    WarningHolder::AddWarning(15, "Raspberry Pi Voltage Too Low");
                     piPowerWarningAdded = true;
                 }
             } else {

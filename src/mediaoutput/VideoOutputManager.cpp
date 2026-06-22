@@ -152,6 +152,11 @@ void VideoOutputManager::Reload() {
 }
 
 void VideoOutputManager::Shutdown() {
+    // Idempotent: main() calls this at shutdown and ~VideoOutputManager() calls
+    // it again at static-destruction time. Run the teardown only once.
+    if (m_shutdownDone.exchange(true)) {
+        return;
+    }
     // Stop SAP announcer first — outside the lock because SAP thread needs m_mutex
     StopSAPAnnouncer();
 
@@ -547,6 +552,7 @@ bool VideoOutputManager::StartHdmiConsumerGroup(const std::vector<size_t>& indic
     if (!pipeline) {
         LogErr(VB_MEDIAOUT, "VideoOutputManager: Group pipeline creation failed: %s\n",
                error ? error->message : "unknown");
+        WarningHolder::AddWarning(31, "Video output group pipeline creation failed");
         if (error) g_error_free(error);
         return false;
     }
@@ -901,6 +907,7 @@ bool VideoOutputManager::StartConsumer(ConsumerInfo& consumer) {
     if (!consumer.pipeline) {
         LogErr(VB_MEDIAOUT, "VideoOutputManager: Failed to create pipeline for '%s': %s\n",
                consumer.name.c_str(), error ? error->message : "unknown error");
+        WarningHolder::AddWarning(31, "Video output pipeline creation failed for '" + consumer.name + "'");
         if (error) g_error_free(error);
         return false;
     }
@@ -937,6 +944,7 @@ bool VideoOutputManager::StartConsumer(ConsumerInfo& consumer) {
                 int planeId = GStreamerOutput::FindPrimaryPlaneForConnector(drmFd, resolvedConnId);
                 if (planeId >= 0) {
                     g_object_set(sink, "plane-id", planeId, NULL);
+                    consumer.assignedPlaneId = planeId;
                 }
                 LogInfo(VB_MEDIAOUT, "VideoOutputManager: Set shared DRM fd=%d plane=%d on consumer '%s' kmssink\n",
                         drmFd, planeId, consumer.name.c_str());
@@ -1185,13 +1193,21 @@ void VideoOutputManager::StopConsumer(ConsumerInfo& consumer) {
     if (consumer.pipeline) {
         GstElement* p = consumer.pipeline;
         consumer.pipeline = nullptr;
+        // Release the reserved overlay plane only after the pipeline reaches
+        // NULL (which destroys the kmssink and frees the plane in DRM).
+        // Releasing it earlier would let a new consumer claim a plane the old
+        // kmssink still holds.  -1 if this consumer never got a plane.
+        int planeId = consumer.assignedPlaneId;
+        consumer.assignedPlaneId = -1;
         {
             std::lock_guard<std::mutex> tl(m_teardownMutex);
             m_pendingTeardowns++;
         }
-        std::thread([this, p]() {
+        std::thread([this, p, planeId]() {
             gst_element_set_state(p, GST_STATE_NULL);
             gst_object_unref(p);
+            if (planeId >= 0)
+                GStreamerOutput::ReleasePlane(planeId);
             {
                 std::lock_guard<std::mutex> tl(m_teardownMutex);
                 m_pendingTeardowns--;

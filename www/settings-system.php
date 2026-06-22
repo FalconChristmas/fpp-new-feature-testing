@@ -43,8 +43,8 @@ function UploadAuthorizedKeys() {
 }
 
 var resetAreas = ['config', 'network', 'media', 'sequences', 'effects', 'playlists',
-    'channeloutputs', 'schedule', 'settings', 'uploads', 'logs', 'plugins',
-    'pluginConfigs', 'user', 'caches', 'scripts', 'backups'];
+    'channeloutputs', 'eeprom', 'schedule', 'settings', 'uploads', 'logs', 'plugins',
+    'pluginConfigs', 'user', 'caches', 'scripts', 'backups', 'audiobackend'];
 function AllButtonClicked() {
     for (var i = 0; i < resetAreas.length; i++) {
         if (resetAreas[i] != 'network')
@@ -212,6 +212,11 @@ You can individually select what settings you want to reset." src="images/redesi
                 <div class="col-md"><b>OS</b></div>
             </div>
             <div class="row">
+                <div class="col-md"><input type='checkbox' id='rc_eeprom'>&nbsp;EEPROM / String Config</div>
+                <div class="col-md"></div>
+                <div class="col-md"></div>
+            </div>
+            <div class="row">
                 <div class="col-md"><input type='checkbox' id='rc_logs'>&nbsp;Logs</div>
                 <div class="col-md"><input type='checkbox' id='rc_playlists'>&nbsp;Playlists</div>
                 <div class="col-md"><input type='checkbox' id='rc_user'>&nbsp;Root/FPP User Files</div>
@@ -229,6 +234,11 @@ You can individually select what settings you want to reset." src="images/redesi
             <div class="row">
                 <div class="col-md"><input type='checkbox' id='rc_caches'>&nbsp;Caches</div>
                 <div class="col-md"><input type='checkbox' id='rc_scripts'>&nbsp;Scripts</div>
+                <div class="col-md"></div>
+            </div>
+            <div class="row">
+                <div class="col-md"><input type='checkbox' id='rc_audiobackend'>&nbsp;Audio Backend (PipeWire)</div>
+                <div class="col-md"></div>
                 <div class="col-md"></div>
             </div>
         </div>
