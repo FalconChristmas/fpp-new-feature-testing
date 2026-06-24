@@ -13,6 +13,7 @@
 #include <cstring>
 #include <dirent.h>
 #include <vector>
+#include <net/if.h>
 #include <unistd.h>
 #include <sys/time.h>
 
@@ -194,6 +195,19 @@ static void resolve_callback(AvahiServiceResolver* r,
         char addr_buf[AVAHI_ADDRESS_STR_MAX];
         avahi_address_snprint(addr_buf, sizeof(addr_buf), a);
         std::string ip(addr_buf);
+        // An IPv6 link-local address (fe80::/10) is only usable together with the
+        // interface it was discovered on, so carry the zone id ("%eth0") along.
+        // Without it curl can't pick an interface and the address can't be reached
+        // on IPv6-only networks.  The zone is harmless to the IPv4-only ping paths
+        // (they already can't parse a v6 address).
+        if (a->proto == AVAHI_PROTO_INET6 && interface != AVAHI_IF_UNSPEC &&
+            ip.rfind("fe80", 0) == 0 && ip.find('%') == std::string::npos) {
+            char ifname[IF_NAMESIZE] = {0};
+            if (if_indextoname(interface, ifname)) {
+                ip += "%";
+                ip += ifname;
+            }
+        }
         // WLED nodes (and FPP's own _wled._tcp advertisement) are probed over
         // HTTP rather than the FPP ping protocol.
         bool isWled = (type != nullptr && strstr(type, "_wled._tcp") != nullptr);
@@ -417,17 +431,17 @@ void MDNSManager::HandleResolveIP(const std::string& ip, bool isWled) {
     });
     MultiSync::INSTANCE.PingSingleRemote(ip.c_str(), 1);
 
-    if (isWled) {
-        // WLED nodes don't respond to the FPP ping, so also probe over HTTP,
-        // which runs controller detection and adds the node to the systems
-        // list. Done on a detached thread so the blocking curl request doesn't
-        // stall the main event loop. PingSingleRemoteViaHTTP calls UpdateSystem
-        // itself. (For an FPP node that also advertises _wled._tcp this is a
-        // harmless refresh - detection identifies it as FPP.)
-        std::thread([ip]() {
-            MultiSync::INSTANCE.PingSingleRemoteViaHTTP(ip);
-        }).detach();
-    }
+    // Always probe over HTTP as well, on a detached thread so the blocking curl
+    // request doesn't stall the main event loop. The FPP discover-ping does not
+    // carry the remote's System UUID, so without this probe an FPP peer's UUID
+    // stays empty in the systems list - HTTP controller detection populates it
+    // (needed for duplicate-UUID detection and device identification). This runs
+    // only once per newly discovered host. Harmless for a pure WLED node;
+    // detection just identifies it as WLED. PingSingleRemoteViaHTTP calls
+    // UpdateSystem itself.
+    std::thread([ip]() {
+        MultiSync::INSTANCE.PingSingleRemoteViaHTTP(ip);
+    }).detach();
 
     // Take a snapshot of callbacks while holding the lock, then invoke them without the lock
     // to avoid deadlock/iterator invalidation if callbacks modify m_callbacks
