@@ -36,4 +36,5 @@ private:
     int m_rgbTriplets;
     int m_lastTripletOffset;
     int m_lastPatternOffset;
+    int m_channelsPerNode; // 3 for RGB, 4 for RGBW
 };
