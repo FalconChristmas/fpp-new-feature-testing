@@ -394,7 +394,7 @@
             if (isProxied(ip)) {
                 return 'proxy/' + ip + path;
             }
-            return 'http://' + ip + path;
+            return buildHttpURL(ip, path);
         }
 
         function ipLink(ip) {
@@ -402,6 +402,63 @@
                 return ip;
             }
             return "<a target='host_" + ip + "' href='" + wrapUrlWithProxy(ip, "/") + "' data-ip='" + ip + "'>" + ip + "</a>";
+        }
+
+        // Build the wifi signal-strength icon span from an interface's wifi object.
+        function buildWifiIconHtml(w) {
+            var h = ['<span title="'];
+            if (w.pct) {
+                h.push(w.pct + '%');
+                if (w.unit == 'dBm') {
+                    h.push(' ' + w.level + 'dBm');
+                }
+            } else {
+                h.push(w.level + w.unit);
+            }
+            h.push('" class="wifi-icon wifi-', w.desc, '"></span>');
+            return h.join('');
+        }
+
+        // Insert html immediately after a whole-token occurrence of ip in s
+        // (used for rows that render addresses as plain text). A match is only
+        // accepted when the next character is not an address character, so a
+        // short IP (10.0.0.5) is never inserted inside a longer one (10.0.0.50).
+        // Returns the new string, or null if ip isn't present as a whole token.
+        function insertAfterPlainIp(s, ip, html) {
+            var idx = 0;
+            while ((idx = s.indexOf(ip, idx)) !== -1) {
+                var end = idx + ip.length;
+                var after = s.charAt(end); // '' past end of string
+                if (after === '' || '0123456789abcdefABCDEF:.'.indexOf(after) === -1) {
+                    return s.slice(0, end) + html + s.slice(end);
+                }
+                idx = end;
+            }
+            return null;
+        }
+
+        // Build the ipaddress cell HTML, inserting each {ip, html} wifi mark
+        // immediately after that IP. Prefer anchoring on the IP's link close tag
+        // ("IP</a>"), which is collision-proof; fall back to a whole-token
+        // plain-text match for rows that render addresses without links (the
+        // local row, or hideExternalURLs).
+        function ipCellWithWifiMarks(base, extra, marks) {
+            base = base || '';
+            extra = extra || '';
+            (marks || []).forEach(function (m) {
+                var endTag = m.ip + '</a>';
+                var r;
+                if (base.indexOf(endTag) !== -1) {
+                    base = base.replace(endTag, endTag + m.html);
+                } else if (extra.indexOf(endTag) !== -1) {
+                    extra = extra.replace(endTag, endTag + m.html);
+                } else if ((r = insertAfterPlainIp(base, m.ip, m.html)) !== null) {
+                    base = r;
+                } else if ((r = insertAfterPlainIp(extra, m.ip, m.html)) !== null) {
+                    extra = r;
+                }
+            });
+            return base + extra;
         }
 
         /**
@@ -1251,78 +1308,28 @@
                         }
 
                         // Wifi path 1: interfaces-based (newer systems).
-                        // Show icon next to whichever IP in this row is on an active wifi
-                        // interface (link > 0). Covers both cases:
-                        //   - polled IP is the wifi IP (common case)
-                        //   - polled IP is eth0 but device's wlan0 IP is also shown in this row
-                        var wifiIconHtml = '';
-                        var wifiIconIp = null;
+                        // Mark EVERY displayed address that lives on an active wifi
+                        // interface (link > 0). A wireless NIC typically has both an
+                        // IPv4 and an IPv6 address, so both should carry the icon.
+                        var wifiMarks = [];   // [{ ip, html }] one per displayed wifi address
                         if (data.hasOwnProperty('wifi') && data.hasOwnProperty('interfaces')) {
-                            var ipIface = null;
-                            var anyWifiIface = null;
-                            var anyWifiIp = null;
                             var rowIpHtml = (item._baseIpHtml || '') + (item._extraIpHtml || '');
                             for (var i = 0; i < data.interfaces.length; i++) {
                                 var iface = data.interfaces[i];
-                                if (iface.addr_info) {
+                                if (iface.hasOwnProperty('wifi') && (iface.wifi.link || 0) > 0 && iface.addr_info) {
+                                    var ifaceIconHtml = buildWifiIconHtml(iface.wifi);
                                     for (var j = 0; j < iface.addr_info.length; j++) {
                                         var addr = iface.addr_info[j].local;
-                                        if (addr === ip) {
-                                            ipIface = iface;
-                                        }
-                                        // Track any wifi interface whose IP is displayed in this row
-                                        if (!anyWifiIface && iface.hasOwnProperty('wifi') &&
-                                                (iface.wifi.link || 0) > 0 &&
-                                                rowIpHtml.indexOf(addr) !== -1) {
-                                            anyWifiIface = iface;
-                                            anyWifiIp = addr;
+                                        if (addr && rowIpHtml.indexOf(addr) !== -1 &&
+                                                !wifiMarks.some(function (m) { return m.ip === addr; })) {
+                                            wifiMarks.push({ ip: addr, html: ifaceIconHtml });
                                         }
                                     }
                                 }
                             }
-                            // Prefer the polled IP's own wifi; fall back to any displayed wifi IP
-                            var wifiSource = null;
-                            if (ipIface && ipIface.hasOwnProperty('wifi') &&
-                                    (ipIface.wifi.link || 0) > 0) {
-                                wifiSource = ipIface;
-                                wifiIconIp = ip;
-                            } else if (anyWifiIface) {
-                                wifiSource = anyWifiIface;
-                                wifiIconIp = anyWifiIp;
-                            }
-                            if (wifiSource) {
-                                var w = wifiSource.wifi;
-                                var wifi_html = [];
-                                wifi_html.push('<span title="');
-                                if (w.pct) {
-                                    wifi_html.push(w.pct + '%');
-                                    if (w.unit == 'dBm') {
-                                        wifi_html.push(' ' + w.level + 'dBm');
-                                    }
-                                } else {
-                                    wifi_html.push(w.level + w.unit);
-                                }
-                                wifi_html.push('" class="wifi-icon wifi-');
-                                wifi_html.push(w.desc);
-                                wifi_html.push('"></span>');
-                                wifiIconHtml = wifi_html.join('');
-                            }
                         }
-                        // Insert wifi icon immediately after the correct IP's link.
-                        var base = item._baseIpHtml || '';
-                        var extra = item._extraIpHtml || '';
-                        if (wifiIconHtml && wifiIconIp) {
-                            var endTag = wifiIconIp + '</a>';
-                            if (base.indexOf(endTag) !== -1) {
-                                item.ipaddress = base.replace(endTag, endTag + wifiIconHtml) + extra;
-                            } else if (extra.indexOf(endTag) !== -1) {
-                                item.ipaddress = base + extra.replace(endTag, endTag + wifiIconHtml);
-                            } else {
-                                item.ipaddress = base.replace(wifiIconIp, wifiIconIp + wifiIconHtml) + extra;
-                            }
-                        } else {
-                            item.ipaddress = base + extra;
-                        }
+                        // Insert the wifi icon(s) next to their address(es).
+                        item.ipaddress = ipCellWithWifiMarks(item._baseIpHtml, item._extraIpHtml, wifiMarks);
 
                         if (item._dataIp !== ip) item._dataIp = ip;
 
@@ -1343,7 +1350,7 @@
                                 let wstr = data.warnings[i];
                                 let idx = wstr.indexOf("href=");
                                 if (idx > 0) {
-                                    wstr = wstr.substr(0, idx + 6) + "http://" + ip + "/" + wstr.substr(idx + 6);
+                                    wstr = wstr.substr(0, idx + 6) + buildHttpURL(ip, "/") + wstr.substr(idx + 6);
                                 }
                                 wHTML += "<span class='warning-text'>" + wstr + "</span><br>";
                             }
@@ -1464,7 +1471,7 @@
                                             }
                                         }
                                     }
-                                    if (isWifiIp && wifiIconHtml === '') {
+                                    if (isWifiIp && wifiMarks.length === 0) {
                                         var rssi = +data.advancedView.rssi;
                                         var quality = 2 * (rssi + 100);
 
@@ -1488,15 +1495,9 @@
                                         wifi_html.push(desc);
                                         wifi_html.push('"></span>');
 
-                                        wifiIconHtml = wifi_html.join('');
-                                        var base2 = item._baseIpHtml || '';
-                                        var extra2 = item._extraIpHtml || '';
-                                        var endTag2 = ip + '</a>';
-                                        if (base2.indexOf(endTag2) !== -1) {
-                                            item.ipaddress = base2.replace(endTag2, endTag2 + wifiIconHtml) + extra2;
-                                        } else {
-                                            item.ipaddress = base2.replace(ip, ip + wifiIconHtml) + extra2;
-                                        }
+                                        // Legacy remotes report a single rssi for the polled IP.
+                                        wifiMarks.push({ ip: ip, html: wifi_html.join('') });
+                                        item.ipaddress = ipCellWithWifiMarks(item._baseIpHtml, item._extraIpHtml, wifiMarks);
                                     }
                                 }
 
@@ -1526,15 +1527,19 @@
 
                             // Add any IPs the device reports in advancedView but that
                             // multiSyncSystems didn't include (e.g. a secondary subnet NIC).
-                            // Extra IPs go into _extraIpHtml so the wifi icon stays between
-                            // the primary IPs and the secondary ones.
+                            // Extra IPs go into _extraIpHtml; the wifi icon(s) stay anchored
+                            // to their own address(es) via ipCellWithWifiMarks().
                             if (data.advancedView.hasOwnProperty('IPs') &&
                                     Array.isArray(data.advancedView.IPs)) {
                                 var changed = false;
                                 var extra = item._extraIpHtml || '';
                                 data.advancedView.IPs.forEach(function(avIp) {
-                                    // Skip link-local (169.254.x.x) — APIPA addresses have no DHCP lease
-                                    if (avIp.indexOf('169.254.') === 0) return;
+                                    // Skip addresses not reachable from the browser: IPv4 APIPA
+                                    // (169.254/16, no DHCP lease), IPv6 link-local (fe80::/10, the
+                                    // zone id is host-specific), and loopback (127.x / ::1).
+                                    var avl = avIp.toLowerCase();
+                                    if (avIp.indexOf('169.254.') === 0 || avl.indexOf('fe80') === 0 ||
+                                        avIp.indexOf('127.') === 0 || avl === '::1') return;
                                     if ((item._baseIpHtml || '').indexOf(avIp) === -1 &&
                                             extra.indexOf(avIp) === -1) {
                                         extra += '<br>' + ipLink(avIp);
@@ -1543,7 +1548,7 @@
                                 });
                                 if (changed) {
                                     item._extraIpHtml = extra;
-                                    item.ipaddress = (item._baseIpHtml || '') + wifiIconHtml + extra;
+                                    item.ipaddress = ipCellWithWifiMarks(item._baseIpHtml, item._extraIpHtml, wifiMarks);
                                 }
                             }
                         }
@@ -1577,6 +1582,32 @@
 
             // UUID → rowID. Each unique UUID = one physical device = one row.
             var seenUuids = {};
+
+            // Canonical UUID per hostname+mode, gathered from any entry that does
+            // report one. A device can advertise some addresses without a UUID
+            // (e.g. a sync master, or an address discovered via ping) while other
+            // addresses carry it; without this, the UUID-less address would key by
+            // hostname and split off into a duplicate row. Borrowing the device's
+            // canonical UUID keeps every address on one row.
+            //
+            // If two DIFFERENT UUIDs share a hostname+mode (e.g. several devices
+            // left on the default hostname), the mapping is ambiguous: store null
+            // so UUID-less addresses fall back to the hostname key instead of being
+            // glued onto whichever same-named device happened to be seen first.
+            var canonicalUuid = {};
+            for (var ci = 0; ci < data.length; ci++) {
+                if (data[ci].uuid && data[ci].uuid !== '') {
+                    var cHost = data[ci].hostname || '';
+                    if (cHost !== '') {
+                        var cKey = cHost + ':' + (data[ci].fppModeString || '');
+                        if (!canonicalUuid.hasOwnProperty(cKey)) {
+                            canonicalUuid[cKey] = data[ci].uuid;
+                        } else if (canonicalUuid[cKey] !== data[ci].uuid) {
+                            canonicalUuid[cKey] = null; // hostname shared by >1 UUID
+                        }
+                    }
+                }
+            }
 
             var fppIpAddresses = [];
             var wledIpAddresses = [];
@@ -1644,14 +1675,25 @@
 
                 var hostname = data[i].hostname || ip;
 
-                // Stable row ID: UUID when present, then hostname+mode, then IP.
-                // UUID guarantees one physical device = one row. For older devices
-                // without UUID, hostname+mode deduplicates multi-IP entries without
-                // the version-string mismatch that broke the original hostKey approach.
+                // Stable row ID: the entry's own UUID, else the device's canonical
+                // UUID (borrowed by hostname+mode), else hostname+mode, else IP.
+                // UUID guarantees one physical device = one row; the canonical
+                // fallback keeps UUID-less addresses of a UUID-bearing device on
+                // that same row instead of producing a duplicate.
                 var rawHostname = data[i].hostname || '';
-                var uuid = (data[i].uuid && data[i].uuid !== '')
-                    ? data[i].uuid
-                    : (rawHostname !== '' ? 'host:' + rawHostname + ':' + (data[i].fppModeString || '') : 'ip:' + ip);
+                var hostModeKey = rawHostname + ':' + (data[i].fppModeString || '');
+                var uuid;
+                if (data[i].uuid && data[i].uuid !== '') {
+                    uuid = data[i].uuid;
+                } else if (rawHostname !== '' && canonicalUuid[hostModeKey]) {
+                    // Unambiguous canonical UUID (truthy = exactly one device owns
+                    // this hostname); null/undefined falls through to the host key.
+                    uuid = canonicalUuid[hostModeKey];
+                } else if (rawHostname !== '') {
+                    uuid = 'host:' + rawHostname + ':' + (data[i].fppModeString || '');
+                } else {
+                    uuid = 'ip:' + ip;
+                }
                 var rowID = uuid.replace(/[^a-zA-Z0-9]/g, '_');
                 var hostRowKey = ip.replace(/\./g, '_');
 
